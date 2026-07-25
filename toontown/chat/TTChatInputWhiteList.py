@@ -8,6 +8,7 @@ from panda3d.core import *
 from otp.otpbase import OTPLocalizer
 from direct.directnotify import DirectNotifyGlobal
 from toontown.toonbase import ToontownGlobals
+from toontown.toonbase import KeybindSettings
 
 class TTChatInputWhiteList(ChatInputWhiteListFrame):
     notify = DirectNotifyGlobal.directNotify.newCategory('TTChatInputWhiteList')
@@ -80,7 +81,20 @@ class TTChatInputWhiteList(ChatInputWhiteListFrame):
     def typeCallback(self, extraArgs):
         if self.typeGrabbed:
             return
+        text = self.chatEntry.get(plain=True)
+        if (
+            not self.isActive()
+            and text
+            and KeybindSettings.isGameplayTypingKey(text[-1])
+        ):
+            typedKey = text[-1]
+            self.chatEntry.set(text[:-1])
+            KeybindSettings.reportChatInputForSmoke('suppressed', typedKey.lower())
+            return
         self.applyFilter(extraArgs)
+        text = self.chatEntry.get(plain=True)
+        KeybindSettings.reportChatInputForSmoke(
+            'active' if self.isActive() else 'opening', text)
         if localAvatar.chatMgr.chatInputWhiteList.isActive():
             return
         else:

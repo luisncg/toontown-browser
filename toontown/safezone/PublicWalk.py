@@ -1,5 +1,6 @@
 from panda3d.core import *
 from toontown.toonbase.ToontownGlobals import *
+from toontown.toonbase import KeybindSettings
 from direct.directnotify import DirectNotifyGlobal
 from . import Walk
 
@@ -22,7 +23,8 @@ class PublicWalk(Walk.Walk):
         base.localAvatar.book.showButton()
         self.accept(StickerBookHotkey, self.__handleStickerBookEntry)
         self.accept('enterStickerBook', self.__handleStickerBookEntry)
-        self.accept(OptionsPageHotkey, self.__handleOptionsEntry)
+        self._exitActivityHotkey = KeybindSettings.getActiveEvent('exitActivity')
+        self.accept(self._exitActivityHotkey, self.__handleOptionsEntry)
         base.localAvatar.laffMeter.start()
         base.localAvatar.beginAllowPies()
 
@@ -31,7 +33,7 @@ class PublicWalk(Walk.Walk):
         base.localAvatar.book.hideButton()
         self.ignore(StickerBookHotkey)
         self.ignore('enterStickerBook')
-        self.ignore(OptionsPageHotkey)
+        self.ignore(getattr(self, '_exitActivityHotkey', OptionsPageHotkey))
         base.localAvatar.laffMeter.stop()
         base.localAvatar.endAllowPies()
 

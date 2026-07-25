@@ -8,6 +8,7 @@ from toontown.battle import BattleBase
 from direct.gui.DirectGui import *
 from panda3d.core import *
 from toontown.toonbase import TTLocalizer
+from toontown.battle.ReactiveGagGlobals import isReactiveTrack, getReactiveGagName
 
 class TownBattleToonPanel(DirectFrame):
     notify = DirectNotifyGlobal.directNotify.newCategory('TownBattleToonPanel')
@@ -22,6 +23,9 @@ class TownBattleToonPanel(DirectFrame):
         self.sosText.hide()
         self.fireText = DirectLabel(parent=self, relief=None, pos=(0.1, 0, 0.015), text=TTLocalizer.TownBattleToonFire, text_scale=0.06)
         self.fireText.hide()
+        self.reactiveText = DirectLabel(parent=self, relief=None, pos=(0.1, 0, 0.015),
+                                        text='', text_scale=0.052, text_wordwrap=8)
+        self.reactiveText.hide()
         self.undecidedText = DirectLabel(parent=self, relief=None, pos=(0.1, 0, 0.015), text=TTLocalizer.TownBattleUndecided, text_scale=0.1)
         self.healthText = DirectLabel(parent=self, text='', pos=(-0.06, 0, -0.075), text_scale=0.055)
         self.hpChangeEvent = None
@@ -90,6 +94,7 @@ class TownBattleToonPanel(DirectFrame):
         self.undecidedText.hide()
         self.sosText.hide()
         self.fireText.hide()
+        self.reactiveText.hide()
         self.gagNode.hide()
         self.whichText.hide()
         self.passNode.hide()
@@ -106,6 +111,12 @@ class TownBattleToonPanel(DirectFrame):
             self.whichText['text'] = self.determineWhichText(numTargets, targetIndex, localNum, index)
         elif track == BattleBase.SOS or track == BattleBase.NPCSOS or track == BattleBase.PETSOS:
             self.sosText.show()
+        elif isReactiveTrack(track):
+            self.reactiveText['text'] = getReactiveGagName(track, level)
+            self.reactiveText.show()
+            if numTargets is not None and targetIndex is not None and localNum is not None:
+                self.whichText.show()
+                self.whichText['text'] = self.determineWhichText(numTargets, targetIndex, localNum, index)
         elif track >= MIN_TRACK_INDEX and track <= MAX_TRACK_INDEX:
             self.undecidedText.hide()
             self.passNode.hide()

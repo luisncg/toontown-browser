@@ -3,6 +3,7 @@ from direct.fsm import FSM
 from direct.directnotify import DirectNotifyGlobal
 from direct.gui.DirectButton import DirectButton
 from toontown.toonbase import ToontownGlobals
+from toontown.toonbase import KeybindSettings
 from direct.gui.DirectGui import *
 from direct.interval.IntervalGlobal import *
 from toontown.toonbase import TTLocalizer
@@ -233,9 +234,13 @@ class NewsPageButtonManager(FSM.FSM):
             self.showAppropriateButton()
 
     def acceptEscapeKeyPress(self):
+        self.ignoreEscapeKeyPress()
+        self._exitActivityHotkey = KeybindSettings.getActiveEvent('exitActivity')
         self.accept(ToontownGlobals.StickerBookHotkey, self.simulateEscapeKeyPress)
-        self.accept(ToontownGlobals.OptionsPageHotkey, self.simulateEscapeKeyPress)
+        self.accept(self._exitActivityHotkey, self.simulateEscapeKeyPress)
 
     def ignoreEscapeKeyPress(self):
         self.ignore(ToontownGlobals.StickerBookHotkey)
-        self.ignore(ToontownGlobals.OptionsPageHotkey)
+        hotkey = getattr(self, '_exitActivityHotkey', None)
+        if hotkey:
+            self.ignore(hotkey)

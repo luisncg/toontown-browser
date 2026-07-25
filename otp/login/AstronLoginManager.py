@@ -11,13 +11,28 @@ class AstronLoginManager(DistributedObjectGlobal):
 
     def handleRequestLogin(self):
         playToken = self.cr.playToken or 'dev'
-        self.sendRequestLogin(playToken)
+        password = getattr(self.cr, 'password', '')
+        self.sendRequestLogin(playToken, password)
 
-    def sendRequestLogin(self, playToken):
-        self.sendUpdate('requestLogin', [playToken])
+    def handleRequestCreateAccount(self):
+        playToken = self.cr.playToken or 'dev'
+        password = getattr(self.cr, 'password', '')
+        self.sendRequestCreateAccount(playToken, password)
+
+    def sendRequestLogin(self, playToken, password):
+        self.sendUpdate('requestLogin', [playToken, password])
+
+    def sendRequestCreateAccount(self, playToken, password):
+        self.sendUpdate('requestCreateAccount', [playToken, password])
 
     def loginResponse(self, responseBlob):
-        self.cr.loginScreen.handleLoginToontownResponse(responseBlob)
+        screen = getattr(self.cr, 'createAccountScreen', None)
+        if screen is None:
+            screen = getattr(self.cr, 'loginScreen', None)
+        if screen is None:
+            self.notify.warning('Received a login response with no active login screen.')
+            return
+        screen.handleLoginToontownResponse(responseBlob)
 
     def sendRequestAvatarList(self):
         self.sendUpdate('requestAvatarList')

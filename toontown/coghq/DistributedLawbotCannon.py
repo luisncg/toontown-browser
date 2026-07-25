@@ -13,6 +13,7 @@ from panda3d.otp import *
 from toontown.toon import NPCToons
 from toontown.toon import ToonHead
 from toontown.toonbase import TTLocalizer
+from toontown.toonbase import KeybindSettings
 from toontown.minigame import Trajectory
 from toontown.effects import DustCloud
 GROUND_PLANE_MIN = -15
@@ -319,6 +320,7 @@ class DistributedLawbotCannon(DistributedObject.DistributedObject):
 
     def __enableAimInterface(self):
         self.aimPad.show()
+        self.FIRE_KEY = KeybindSettings.getActiveEvent('performAction')
         self.accept(self.FIRE_KEY, self.__fireKeyPressed)
         self.accept(self.UP_KEY, self.__upKeyPressed)
         self.accept(self.DOWN_KEY, self.__downKeyPressed)

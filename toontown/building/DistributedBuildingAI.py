@@ -8,6 +8,8 @@ from direct.fsm import State
 from direct.fsm import ClassicFSM, State
 from toontown.toonbase.ToontownGlobals import ToonHall
 from . import DistributedToonInteriorAI, DistributedToonHallInteriorAI, DistributedSuitInteriorAI, DistributedDoorAI, DoorTypes, DistributedElevatorExtAI, DistributedKnockKnockDoorAI, SuitPlannerInteriorAI, SuitBuildingGlobals, FADoorCodes
+from . import (DistributedMegaSuitInteriorAI, MegaBuildingGlobals,
+               MegaSuitPlannerInteriorAI)
 from toontown.hood import ZoneUtil
 import random, time
 from toontown.cogdominium.DistributedCogdoInteriorAI import DistributedCogdoInteriorAI
@@ -56,6 +58,9 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
         self.track = 'c'
         self.difficulty = 1
         self.numFloors = 0
+        self.megaFloors = MegaBuildingGlobals.MEGA_MIN_FLOORS
+        self.activeRunFloors = 0
+        self.activeRunWasMega = False
         self.savedBy = []
         self.becameSuitTime = 0
         self.frontDoorPoint = None
@@ -96,6 +101,7 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
             'track': str(self.track),
             'difficulty': str(self.difficulty),
             'numFloors': str(self.numFloors),
+            'megaFloors': str(self.megaFloors),
             'savedBy': self.savedBy,
             'becameSuitTime': self.becameSuitTime
             }
@@ -119,6 +125,7 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
         self.track = suitTrack
         self.difficulty = difficulty
         self.numFloors = numFloors
+        self.megaFloors = MegaBuildingGlobals.chooseMegaFloors(numFloors)
         self.becameSuitTime = time.time()
         self.fsm.request('clearOutToonInterior')
         return
@@ -166,6 +173,9 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
     def getSuitData(self):
         return [
          ord(self.track), self.difficulty, self.numFloors]
+
+    def getMegaFloors(self):
+        return self.megaFloors
 
     def getState(self):
         return [
@@ -291,18 +301,20 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
         return None
 
     def updateSavedBy(self, savedBy):
+        runFloors = self.activeRunFloors or self.numFloors
         if self.savedBy:
             for avId, name, dna in self.savedBy:
                 if not ZoneUtil.isWelcomeValley(self.zoneId):
-                    self.trophyMgr.removeTrophy(avId, self.numFloors)
+                    self.trophyMgr.removeTrophy(avId, runFloors)
 
         self.savedBy = savedBy
         if self.savedBy:
             for avId, name, dna in self.savedBy:
                 if not ZoneUtil.isWelcomeValley(self.zoneId):
-                    self.trophyMgr.addTrophy(avId, name, self.numFloors)
+                    self.trophyMgr.addTrophy(avId, name, runFloors)
 
     def enterWaitForVictors(self, victorList, savedBy):
+        runFloors = self.activeRunFloors or self.numFloors
         activeToons = []
         for t in victorList:
             toon = None
@@ -315,11 +327,11 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
             toon = None
             if t:
                 toon = self.getToon(t)
-                self.air.writeServerEvent('buildingDefeated', t, '%s|%s|%s|%s' % (self.track, self.numFloors, self.zoneId, victorList))
+                self.air.writeServerEvent('buildingDefeated', t, '%s|%s|%s|%s' % (self.track, runFloors, self.zoneId, victorList))
             if toon != None:
-                self.air.questManager.toonKilledBuilding(toon, self.track, self.difficulty, self.numFloors, self.zoneId, activeToons)
+                self.air.questManager.toonKilledBuilding(toon, self.track, self.difficulty, runFloors, self.zoneId, activeToons)
 
-        for i in range(0, 4):
+        for i in range(len(victorList)):
             victor = victorList[i]
             if victor == None or victor not in self.air.doId2do:
                 victorList[i] = 0
@@ -329,8 +341,7 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
 
         self.b_setVictorList(victorList)
         self.updateSavedBy(savedBy)
-        self.victorResponses = [
-         0, 0, 0, 0]
+        self.victorResponses = [0] * len(victorList)
         self.d_setState('waitForVictors')
         return
 
@@ -361,7 +372,7 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
                 if toon != None:
                     self.air.questManager.toonKilledCogdo(toon, self.difficulty, self.numFloors, self.zoneId, activeToons)
 
-        for i in range(0, 4):
+        for i in range(len(victorList)):
             victor = victorList[i]
             if victor == None or victor not in self.air.doId2do:
                 victorList[i] = 0
@@ -371,8 +382,7 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
 
         self.b_setVictorList(victorList)
         self.updateSavedBy(savedBy)
-        self.victorResponses = [
-         0, 0, 0, 0]
+        self.victorResponses = [0] * len(victorList)
         taskMgr.doMethodLater(30, self.victorsTimedOutTask, self.taskName(str(self.block) + '_waitForVictors-timer'))
         self.d_setState('waitForVictorsFromCogdo')
         return
@@ -457,6 +467,7 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
     def enterBecomingSuit(self):
         self.sendUpdate('setSuitData', [
          ord(self.track), self.difficulty, self.numFloors])
+        self.sendUpdate('setMegaFloors', [self.megaFloors])
         self.d_setState('becomingSuit')
         name = self.taskName(str(self.block) + '_becomingSuit-timer')
         taskMgr.doMethodLater(SuitBuildingGlobals.TO_SUIT_BLDG_TIME, self.becomingSuitTask, name)
@@ -482,11 +493,15 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
     def enterSuit(self):
         self.sendUpdate('setSuitData', [
          ord(self.track), self.difficulty, self.numFloors])
+        self.sendUpdate('setMegaFloors', [self.megaFloors])
         zoneId, interiorZoneId = self.getExteriorAndInteriorZoneId()
+        self.activeRunFloors = self.numFloors
+        self.activeRunWasMega = False
         self.planner = SuitPlannerInteriorAI.SuitPlannerInteriorAI(self.numFloors, self.difficulty, self.track, interiorZoneId)
         self.d_setState('suit')
         exteriorZoneId, interiorZoneId = self.getExteriorAndInteriorZoneId()
-        self.elevator = DistributedElevatorExtAI.DistributedElevatorExtAI(self.air, self)
+        self.elevator = DistributedElevatorExtAI.DistributedElevatorExtAI(
+            self.air, self, numSeats=MegaBuildingGlobals.MEGA_MAX_TOONS)
         self.elevator.generateWithRequired(exteriorZoneId)
         self.air.writeServerEvent('building-cog', self.doId, '%s|%s|%s|%s' % (self.zoneId, self.block, self.track, self.numFloors))
 
@@ -569,6 +584,20 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
         self.suitPlannerExt = planner
 
     def _createSuitInterior(self):
+        if getattr(self.elevator, 'megaTrip', False):
+            self.activeRunFloors = self.megaFloors
+            self.activeRunWasMega = True
+            dummy, interiorZoneId = self.getExteriorAndInteriorZoneId()
+            self.elevator.tripPlanner = (
+                MegaSuitPlannerInteriorAI.MegaSuitPlannerInteriorAI(
+                    self.megaFloors, self.difficulty, self.track,
+                    interiorZoneId))
+            return DistributedMegaSuitInteriorAI.DistributedMegaSuitInteriorAI(
+                self.air, self.elevator)
+        self.activeRunFloors = self.numFloors
+        self.activeRunWasMega = False
+        if hasattr(self.elevator, 'tripPlanner'):
+            del self.elevator.tripPlanner
         return DistributedSuitInteriorAI.DistributedSuitInteriorAI(self.air, self.elevator)
 
     def _createCogdoInterior(self):

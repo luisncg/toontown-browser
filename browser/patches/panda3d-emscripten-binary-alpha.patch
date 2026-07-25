@@ -1,0 +1,55 @@
+diff --git a/panda/src/pgraph/config_pgraph.cxx b/panda/src/pgraph/config_pgraph.cxx
+index 2d0b84a4c..2e4f7a28c 100644
+--- a/panda/src/pgraph/config_pgraph.cxx
++++ b/panda/src/pgraph/config_pgraph.cxx
+@@ -345,6 +345,13 @@ ConfigVariableBool m_dual
+  PRC_DESC("Set this false to disable TransparencyAttrib::M_dual altogether "
+           "(and use M_alpha in its place)."));
+ 
++ConfigVariableBool m_binary_alpha
++("m-binary-alpha", false,
++ PRC_DESC("Set this true to render TransparencyAttrib::M_binary using "
++          "M_alpha blending instead of a fixed-function alpha test.  This "
++          "is intended for renderers such as WebGL that cannot apply the "
++          "legacy alpha test."));
++
+ ConfigVariableBool m_dual_opaque
+ ("m-dual-opaque", true,
+  PRC_DESC("Set this false to disable just the opaque part of M_dual."));
+diff --git a/panda/src/pgraph/config_pgraph.h b/panda/src/pgraph/config_pgraph.h
+index 47204979a..c35c3f6f0 100644
+--- a/panda/src/pgraph/config_pgraph.h
++++ b/panda/src/pgraph/config_pgraph.h
+@@ -66,6 +66,7 @@ extern ConfigVariableBool show_vertex_animation;
+ extern ConfigVariableBool show_transparency;
+ 
+ extern ConfigVariableBool m_dual;
++extern ConfigVariableBool m_binary_alpha;
+ extern ConfigVariableBool m_dual_opaque;
+ extern ConfigVariableBool m_dual_transparent;
+ extern ConfigVariableBool m_dual_flash;
+diff --git a/panda/src/pgraph/cullResult.cxx b/panda/src/pgraph/cullResult.cxx
+index 559ca48db..a6b322da3 100644
+--- a/panda/src/pgraph/cullResult.cxx
++++ b/panda/src/pgraph/cullResult.cxx
+@@ -170,8 +170,18 @@ add_object(CullableObject &&object, const CullTraverser *traverser) {
+       break;
+ 
+     case TransparencyAttrib::M_binary:
+-      // M_binary is implemented by explicitly setting the alpha test.
+-      object._state = object._state->compose(get_binary_state());
++      if (m_binary_alpha) {
++        // WebGL has no fixed-function alpha test.  Preserve the cutout by
++        // moving it to the alpha-blended path instead of drawing the texture
++        // card's nominally transparent RGB values as opaque pixels.
++        object._state = object._state->add_attrib(
++          TransparencyAttrib::make(TransparencyAttrib::M_alpha),
++          RenderState::get_max_priority());
++      } else {
++        // M_binary is normally implemented by explicitly setting the alpha
++        // test.
++        object._state = object._state->compose(get_binary_state());
++      }
+       check_flash_transparency(object._state, flash_binary_color);
+       break;
+ 

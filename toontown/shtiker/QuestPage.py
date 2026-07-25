@@ -7,6 +7,7 @@ from toontown.toon import NPCToons
 from toontown.hood import ZoneUtil
 from toontown.toonbase import ToontownGlobals
 from toontown.toonbase import TTLocalizer
+from toontown.toonbase import KeybindSettings
 from toontown.quest import QuestBookPoster
 from direct.directnotify import DirectNotifyGlobal
 
@@ -59,12 +60,16 @@ class QuestPage(ShtikerPage.ShtikerPage):
         return
 
     def acceptOnscreenHooks(self):
-        self.accept(ToontownGlobals.QuestsHotkeyOn, self.showQuestsOnscreen)
-        self.accept(ToontownGlobals.QuestsHotkeyOff, self.hideQuestsOnscreen)
+        self.ignoreOnscreenHooks()
+        self._viewToonTasksHotkey = KeybindSettings.getActiveEvent('viewToonTasks')
+        self.accept(self._viewToonTasksHotkey, self.showQuestsOnscreen)
+        self.accept(self._viewToonTasksHotkey + '-up', self.hideQuestsOnscreen)
 
     def ignoreOnscreenHooks(self):
-        self.ignore(ToontownGlobals.QuestsHotkeyOn)
-        self.ignore(ToontownGlobals.QuestsHotkeyOff)
+        hotkey = getattr(self, '_viewToonTasksHotkey', None)
+        if hotkey:
+            self.ignore(hotkey)
+            self.ignore(hotkey + '-up')
 
     def unload(self):
         self.ignore('questsChanged')

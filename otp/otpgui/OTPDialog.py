@@ -9,10 +9,29 @@ CancelOnly = 2
 TwoChoice = 3
 YesNo = 4
 TwoChoiceCustom = 5
+MobilePortraitRenderKey = 'open-toontown.mobile-portrait-render'
+MobileDialogButtonScale = 1.35
+
+
+def getDialogButtonScale():
+    """Return a larger touch-friendly scale for portrait browser play."""
+    try:
+        import browser_storage
+        if browser_storage.get_item(MobilePortraitRenderKey) == '1':
+            return MobileDialogButtonScale
+    except (ImportError, RuntimeError):
+        pass
+    return 1.0
+
+
+def applyDefaultDialogButtonScale(options):
+    """Preserve custom dialog layouts while improving the shared default."""
+    options.setdefault('button_scale', getDialogButtonScale())
 
 class OTPDialog(DirectDialog):
 
     def __init__(self, parent = None, style = NoButtons, **kw):
+        applyDefaultDialogButtonScale(kw)
         if parent == None:
             parent = aspect2d
         self.style = style

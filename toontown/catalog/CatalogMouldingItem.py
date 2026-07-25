@@ -129,7 +129,7 @@ def getAllMouldings(*indexList):
 
 
 def getMouldingRange(fromIndex, toIndex, *otherRanges):
-    list = []
+    items = []
     froms = [fromIndex]
     tos = [toIndex]
     i = 0
@@ -138,15 +138,15 @@ def getMouldingRange(fromIndex, toIndex, *otherRanges):
         tos.append(otherRanges[i + 1])
         i += 2
 
-    for patternIndex in list(MouldingTypes.keys()):
+    for patternIndex in MouldingTypes.keys():
         for fromIndex, toIndex in zip(froms, tos):
             if patternIndex >= fromIndex and patternIndex <= toIndex:
                 colors = MouldingTypes[patternIndex][MTColor]
                 if colors:
                     for n in range(len(colors)):
-                        list.append(CatalogMouldingItem(patternIndex, n))
+                        items.append(CatalogMouldingItem(patternIndex, n))
 
                 else:
-                    list.append(CatalogMouldingItem(patternIndex, 0))
+                    items.append(CatalogMouldingItem(patternIndex, 0))
 
-    return list
+    return items

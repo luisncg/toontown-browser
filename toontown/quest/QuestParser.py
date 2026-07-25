@@ -2,6 +2,8 @@ import sys
 import os
 import tokenize
 import copy
+import operator
+import time
 from direct.interval.IntervalGlobal import *
 from direct.directnotify import DirectNotifyGlobal
 from panda3d.core import *
@@ -23,6 +25,197 @@ notify = DirectNotifyGlobal.directNotify.newCategory('QuestParser')
 lineDict = {}
 globalVarDict = {}
 curId = None
+_actorAnimationControlCacheName = '_npcMovieAnimationControlCache'
+
+
+def _getActorAnimationControlCache(actor):
+    cache = getattr(actor, _actorAnimationControlCacheName, None)
+    if cache is None:
+        cache = {}
+        setattr(actor, _actorAnimationControlCacheName, cache)
+    return cache
+
+
+def prepareAnimationControls(actor, animNames):
+    """Bind several animations with one Actor traversal and group by name."""
+    animNames = tuple(animNames)
+    if not animNames:
+        return {}
+    controls = tuple(actor.getAnimControls(
+        animNames, allowAsyncBind=False))
+    if not controls or len(controls) % len(animNames):
+        notify.warning(
+            'Could not batch animation controls for %s; using safe fallback.'
+            % (animNames,))
+        return {
+            animName: tuple(actor.getAnimControls(
+                animName, allowAsyncBind=False))
+            for animName in animNames
+        }
+    # Actor.getAnimControls() walks each LOD/part and then each requested
+    # animation.  Taking every Nth item reconstructs the per-animation lists
+    # without repeating that expensive browser-side Actor traversal.
+    stride = len(animNames)
+    return {
+        animName: controls[index::stride]
+        for index, animName in enumerate(animNames)
+    }
+
+
+def primeAnimationControls(actor, controlsByAnimation):
+    """Seed controls that were bound while a loading screen was visible."""
+    cache = _getActorAnimationControlCache(actor)
+    for animName, controls in controlsByAnimation.items():
+        cache[animName] = tuple(controls)
+
+
+def getAnimationControls(actor, animName):
+    """Return one cached per-animation control tuple for an Actor."""
+    cache = _getActorAnimationControlCache(actor)
+    controls = cache.get(animName)
+    if controls is None:
+        controls = tuple(actor.getAnimControls(animName))
+        cache[animName] = controls
+    return controls
+
+
+def playActorAnimation(actor, animName, playRate=1.0, loop=False):
+    """Start an Actor animation without repeating its expensive traversal."""
+    controls = getAnimationControls(actor, animName)
+    for control in controls:
+        control.setPlayRate(playRate)
+        if loop:
+            # Actor.loop() normally supplies restart=1 to the native
+            # AnimControl binding; cached direct playback must do the same.
+            control.loop(1)
+        else:
+            control.play()
+
+
+def getActorAnimationDuration(actor, animName):
+    """Return an animation duration without calling Actor.getAnimControls."""
+    controls = getAnimationControls(actor, animName)
+    if not controls:
+        return 0.0
+    control = controls[0]
+    return float(control.getNumFrames()) / control.getFrameRate()
+
+
+def prepareTutorialRewardActor():
+    """Build the post-Cog Tutorial Tom while the tutorial is still loading."""
+    cachedActor = getattr(base.cr, '_tutorialRewardTomActor', None)
+    if cachedActor is not None and not getattr(
+            cachedActor, 'Toon_deleted', False):
+        return cachedActor
+
+    from toontown.toon import Toon
+    from toontown.toon import ToonDNA
+
+    startedAt = time.perf_counter()
+    actor = Toon.Toon()
+    dna = ToonDNA.ToonDNA()
+    dna.newToonFromProperties(
+        'dll', 'ms', 'm', 'm', 7, 0, 7, 7, 2, 6, 2, 6, 2, 16)
+    actor.setDNA(dna)
+    primeAnimationControls(actor, prepareAnimationControls(
+        actor,
+        ('neutral', 'right-hand-start', 'right-hand', 'teleport', 'jump'),
+    ))
+    gsg = base.win.getGsg() if base.win else None
+    if gsg:
+        actor.prepareScene(gsg)
+    actor.hide()
+    base.cr._tutorialRewardTomActor = actor
+    elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+    print('[BrowserPerformanceScript] prepare tutorial_reward %s' % elapsedMs)
+    return actor
+
+
+def takeTutorialRewardActor():
+    """Transfer ownership of the prepared reward actor to the battle movie."""
+    actor = getattr(base.cr, '_tutorialRewardTomActor', None)
+    base.cr._tutorialRewardTomActor = None
+    if actor is not None and not getattr(actor, 'Toon_deleted', False):
+        return actor
+    return None
+
+
+def _scriptPerformanceCategory(scriptId):
+    return {
+        'tutorial_mickey': 'tutorial_intro',
+        'quest_assign_101': 'tutorial_tom',
+        'quest_assign_110': 'tutorial_book',
+        'tutorial_blocker': 'tutorial_blocker',
+        'reward_100': 'tutorial_reward',
+        'gag_intro': 'tutorial_gag_shop',
+    }.get(scriptId, 'other')
+
+
+def _commandPerformanceCategory(command):
+    if command in ('CHAT', 'CLEAR_CHAT', 'CHAT_CONFIRM',
+                   'LOCAL_CHAT_CONFIRM', 'LOCAL_CHAT_PERSIST',
+                   'LOCAL_CHAT_TO_CONFIRM', 'CC_CHAT_CONFIRM',
+                   'CC_CHAT_TO_CONFIRM'):
+        return 'dialogue'
+    if command in ('REPARENTTO', 'WRTREPARENTTO', 'SHOW', 'HIDE'):
+        return 'visibility'
+    if command in ('POS', 'HPR', 'SCALE', 'POSHPRSCALE') or \
+            command.startswith('LERP_'):
+        return 'transform'
+    if command in ('PLAY_ANIM', 'LOOP_ANIM'):
+        return 'animation'
+    if command in ('ADD_INVENTORY', 'SET_INVENTORY',
+                   'SET_INVENTORY_YPOS', 'SET_INVENTORY_DETAIL'):
+        return 'inventory'
+    if command in ('TOON_HEAD', 'FUNCTION', 'SHOW_BOOK', 'HIDE_BOOK',
+                   'ENABLE_CLOSE_BOOK', 'OBSCURE_BOOK', 'OBSCURE_CHAT',
+                   'ARROWS_ON', 'ARROWS_OFF'):
+        return 'interface'
+    if command in ('PLAY_SFX', 'STOP_SFX', 'SET_MUSIC_VOLUME'):
+        return 'audio'
+    if command in ('LOAD', 'LOAD_CHAR', 'LOAD_CLASSIC_CHAR', 'LOAD_SUIT'):
+        return 'load'
+    if command in ('FREE_LOCALTOON', 'LOCK_LOCALTOON'):
+        return 'controls'
+    if command == 'FINISH_QUEST_MOVIE':
+        return 'finish'
+    return None
+
+
+def preloadTutorialAssets():
+    """Prepare the small phase 3.5 tutorial set before gameplay is visible."""
+    startedAt = time.perf_counter()
+    gsg = base.win.getGsg() if base.win else None
+    for modelPath in (
+        'phase_3.5/models/gui/tutorial_gui',
+        'phase_3.5/models/props/tart',
+        'phase_3.5/models/props/squirting-flower',
+    ):
+        model = loader.loadModel(modelPath)
+        if gsg and not model.isEmpty():
+            model.prepareScene(gsg)
+        model.removeNode()
+    if gsg:
+        # The first Tutorial Tom movie scales these already-created GUI trees
+        # onto the screen.  Preparing them while the loading screen is still
+        # up avoids a multi-second first-render hitch on browsers.
+        for gui in (
+            base.localAvatar.inventory,
+            base.localAvatar.laffMeter,
+            base.localAvatar.questPage,
+        ):
+            gui.prepareScene(gsg)
+    classicChar = Char.Char()
+    classicDna = CharDNA.CharDNA()
+    classicDna.newChar(
+        'mk' if base.localAvatar.getStyle().gender == 'm' else 'mn')
+    classicChar.setDNA(classicDna)
+    if gsg:
+        classicChar.prepareScene(gsg)
+    classicChar.delete()
+    base.loader.loadSfx('phase_3.5/audio/sfx/tick_counter.ogg')
+    elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+    print('[BrowserPerformanceScript] preload tutorial_assets %s' % elapsedMs)
 
 def init():
     globalVarDict.update({'render': render,
@@ -151,6 +344,21 @@ class NPCMoviePlayer(DirectObject.DirectObject):
     def setVar(self, varName, var):
         self.privateVarDict[varName] = var
 
+    def primeAnimationControls(self, actor, controlsByAnimation):
+        """Seed controls prepared while a scene's loading screen is visible."""
+        primeAnimationControls(actor, controlsByAnimation)
+
+    def playActorAnimation(self, actor, animName, playRate, loop):
+        """Set the rate and start an animation without repeated Actor lookups.
+
+        Actor.setPlayRate() and Actor.play()/loop() each call
+        getAnimControls().  Reconstructing that list is unusually expensive in
+        the browser runtime, even after the animation has already been bound.
+        Keeping the controls for the lifetime of this movie makes the normal
+        two lookups a single cache miss, or no miss at all for primed scenes.
+        """
+        playActorAnimation(actor, animName, playRate, loop)
+
     def cleanup(self):
         if self.currentTrack:
             self.currentTrack.pause()
@@ -162,6 +370,9 @@ class NPCMoviePlayer(DirectObject.DirectObject):
 
         while self.chars:
             self.__unloadChar(self.chars[0])
+
+        if self.isLocalToon:
+            self.resetPerformanceCommand()
 
         del self.toonHeads
         del self.privateVarDict
@@ -186,17 +397,36 @@ class NPCMoviePlayer(DirectObject.DirectObject):
                 self.timeoutTrack.start()
 
     def finishMovie(self):
-        self.npc.finishMovie(self.toon, self.isLocalToon, 0.0)
+        try:
+            self.npc.finishMovie(self.toon, self.isLocalToon, 0.0)
+        finally:
+            if self.isLocalToon:
+                self.resetPerformanceCommand()
+
+    def recordPerformanceCommand(self, commandCategory, lineNum):
+        scriptCategory = _scriptPerformanceCategory(self.scriptId)
+        if scriptCategory != 'other':
+            print('[BrowserPerformanceCommand] %s %s %s' % (
+                scriptCategory, commandCategory, lineNum))
+
+    def resetPerformanceCommand(self):
+        print('[BrowserPerformanceCommand] other idle 0')
 
     def playNextChapter(self, eventName, timeStamp = 0.0):
         trackList = self.chapterDict[eventName]
         if trackList:
             self.currentTrack = trackList.pop(0)
+            startedAt = time.perf_counter()
             self.currentTrack.start()
+            elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+            if elapsedMs >= 25:
+                print('[BrowserPerformanceScript] chapter %s %s' % (
+                    _scriptPerformanceCategory(self.scriptId), elapsedMs))
         else:
             notify.debug('Movie ended waiting for an event (%s)' % eventName)
 
     def play(self):
+        startedAt = time.perf_counter()
         lineNum = 0
         self.currentEvent = 'start'
         lines = lineDict.get(self.scriptId)
@@ -215,6 +445,10 @@ class NPCMoviePlayer(DirectObject.DirectObject):
             else:
                 uponTimeout = 0
                 iList = chapterList
+            commandCategory = _commandPerformanceCategory(command)
+            if self.isLocalToon and commandCategory:
+                iList.append(Func(
+                    self.recordPerformanceCommand, commandCategory, lineNum))
             if command == 'CALL':
                 if uponTimeout:
                     self.notify.error('CALL not allowed in an UPON_TIMEOUT')
@@ -453,6 +687,9 @@ class NPCMoviePlayer(DirectObject.DirectObject):
         if timeoutList:
             self.timeoutTrack = Sequence(*timeoutList)
         self.playNextChapter('start')
+        elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+        print('[BrowserPerformanceScript] setup %s %s' % (
+            _scriptPerformanceCategory(self.scriptId), elapsedMs))
         return
 
     def closePreviousChapter(self, iList):
@@ -529,6 +766,18 @@ class NPCMoviePlayer(DirectObject.DirectObject):
         char.hideName()
         self.setVar(name, char)
         self.chars.append(char)
+        if self.scriptId == 'tutorial_mickey':
+            self.primeAnimationControls(char, prepareAnimationControls(
+                char,
+                (
+                    'run',
+                    'neutral',
+                    'left-point-start',
+                    'left-point',
+                    'right-point-start',
+                    'right-point',
+                ),
+            ))
 
     def parseUnloadChar(self, line):
         token, name = line
@@ -768,7 +1017,7 @@ class NPCMoviePlayer(DirectObject.DirectObject):
         else:
             notify.error('invalid number of arguments')
         actor = self.getVar(actorName)
-        return Sequence(Func(actor.setPlayRate, playRate, animName), Func(actor.play, animName))
+        return Func(self.playActorAnimation, actor, animName, playRate, False)
 
     def parseLoopAnim(self, line):
         if len(line) == 3:
@@ -779,7 +1028,7 @@ class NPCMoviePlayer(DirectObject.DirectObject):
         else:
             notify.error('invalid number of arguments')
         actor = self.getVar(actorName)
-        return Sequence(Func(actor.setPlayRate, playRate, animName), Func(actor.loop, animName))
+        return Func(self.playActorAnimation, actor, animName, playRate, True)
 
     def parseLerpPos(self, line):
         token, nodeName, x, y, z, t = line
@@ -856,8 +1105,7 @@ class NPCMoviePlayer(DirectObject.DirectObject):
     def parseFunction(self, line):
         token, objectName, functionName = line
         object = self.getVar(objectName)
-        cfunc = compile('object' + '.' + functionName, '<string>', 'eval')
-        return Func(eval(cfunc))
+        return Func(operator.attrgetter(functionName)(object))
 
     def parseAddLaffMeter(self, line):
         token, maxHpDelta = line

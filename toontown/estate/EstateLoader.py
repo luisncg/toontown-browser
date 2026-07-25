@@ -167,6 +167,7 @@ class EstateLoader(SafeZoneLoader.SafeZoneLoader):
         self.place.load()
         self.place.enter(requestStatus)
         self.estateZoneId = zoneId
+        self.notify.info('Entered estate zone %s for owner %s' % (zoneId, self.estateOwnerId))
 
     def exitEstate(self):
         self.notify.debug('exitEstate')
@@ -212,6 +213,9 @@ class EstateLoader(SafeZoneLoader.SafeZoneLoader):
         base.cr.playGame.setPlace(self.place)
         self.place.load()
         self.place.enter(requestStatus)
+        self.notify.info(
+            'Entered house interior zone %s for owner %s' %
+            (requestStatus['zoneId'], self.estateOwnerId))
 
     def exitHouse(self):
         self.ignore(self.houseDoneEvent)

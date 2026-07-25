@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "banks": [
+    {
+      "id": "tutorial-battle",
+      "asset": "audio-bank-tutorial-battle-v1.data",
+      "kind": "short-effects",
+      "phase": "boot",
+      "relevance": [
+        "tutorial",
+        "battle"
+      ],
+      "sampleRate": 22050,
+      "channels": 1,
+      "sounds": [
+        {
+          "logicalName": "aa_pie_throw_only.ogg",
+          "source": "resources/phase_3.5/audio/sfx/AA_pie_throw_only.ogg",
+          "fallbackPandaAsset": "AA_pie_throw_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "aa_tart_only.ogg",
+          "source": "resources/phase_3.5/audio/sfx/AA_tart_only.ogg",
+          "fallbackPandaAsset": "AA_tart_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "aa_squirt_flowersquirt.ogg",
+          "source": "resources/phase_3.5/audio/sfx/AA_squirt_flowersquirt.ogg",
+          "fallbackPandaAsset": "AA_squirt_flowersquirt.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_powertie_throw.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_powertie_throw.ogg",
+          "fallbackPandaAsset": "SA_powertie_throw.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_powertie_impact.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_powertie_impact.ogg",
+          "fallbackPandaAsset": "SA_powertie_impact.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_shred.ogg",
+          "source": "resources/phase_3.5/audio/sfx/SA_shred.ogg",
+          "fallbackPandaAsset": "SA_shred.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_hangup.ogg",
+          "source": "resources/phase_3.5/audio/sfx/SA_hangup.ogg",
+          "fallbackPandaAsset": "SA_hangup.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "av_side_step.ogg",
+          "source": "resources/phase_3.5/audio/sfx/AV_side_step.ogg",
+          "fallbackPandaAsset": "AV_side_step.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "av_jump_to_side.ogg",
+          "source": "resources/phase_3.5/audio/sfx/AV_jump_to_side.ogg",
+          "fallbackPandaAsset": "AV_jump_to_side.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        }
+      ]
+    }
+  ]
+}

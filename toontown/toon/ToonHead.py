@@ -47,6 +47,15 @@ DogMuzzleDict = {'dls': '/models/char/dogMM_Shorts-headMuzzles-',
  'dsl': '/models/char/dogSS_Shorts-headMuzzles-',
  'dll': '/models/char/dogLL_Shorts-headMuzzles-'}
 
+
+def getLookAtTiming(time):
+    totalTime = max(0.02, float(time))
+    lookToTargetTime = max(0.01, totalTime * 0.2)
+    returnToCenterTime = max(0.01, totalTime - lookToTargetTime - 0.5)
+    eyeHoldTime = max(
+        0.0, totalTime - lookToTargetTime - returnToCenterTime)
+    return totalTime, lookToTargetTime, eyeHoldTime, returnToCenterTime
+
 class ToonHead(Actor.Actor):
     notify = DirectNotifyGlobal.directNotify.newCategory('ToonHead')
     EyesOpen = loader.loadTexture('phase_3/maps/eyes.png')
@@ -1013,15 +1022,19 @@ class ToonHead(Actor.Actor):
             return 0
         if blink:
             self.blinkEyes()
-        lookToTgt_TimeFraction = 0.2
-        lookToTgtTime = time * lookToTgt_TimeFraction
-        returnToEyeCenterTime = time - lookToTgtTime - 0.5
+        # Short look-at requests (NPC conversations use 0.5 seconds) used to
+        # subtract a fixed half-second hold and produce a negative return
+        # interval.  Panda clamps that interval to an abrupt zero-duration
+        # transition.  Keep every segment finite and preserve the requested
+        # overall duration instead.
+        totalTime, lookToTgtTime, eyeHoldTime, returnToEyeCenterTime = \
+            getLookAtTiming(time)
         origin = Point3(0, 0, 0)
         blendType = 'easeOut'
-        self.lookAtTrack = Parallel(Sequence(LerpPosInterval(self.__lpupil, lookToTgtTime, endLpupil, blendType=blendType), Wait(0.5), LerpPosInterval(self.__lpupil, returnToEyeCenterTime, origin, blendType=blendType)), Sequence(LerpPosInterval(self.__rpupil, lookToTgtTime, endRpupil, blendType=blendType), Wait(0.5), LerpPosInterval(self.__rpupil, returnToEyeCenterTime, origin, blendType=blendType)), name=self.__stareAtName)
+        self.lookAtTrack = Parallel(Sequence(LerpPosInterval(self.__lpupil, lookToTgtTime, endLpupil, blendType=blendType), Wait(eyeHoldTime), LerpPosInterval(self.__lpupil, returnToEyeCenterTime, origin, blendType=blendType)), Sequence(LerpPosInterval(self.__rpupil, lookToTgtTime, endRpupil, blendType=blendType), Wait(eyeHoldTime), LerpPosInterval(self.__rpupil, returnToEyeCenterTime, origin, blendType=blendType)), name=self.__stareAtName)
         for lodName in self.getLODNames():
             head = self.getPart('head', lodName)
-            self.lookAtTrack.append(LerpHprInterval(head, time, endHpr, blendType='easeInOut'))
+            self.lookAtTrack.append(LerpHprInterval(head, totalTime, endHpr, blendType='easeInOut'))
 
         self.lookAtTrack.start()
         return 1

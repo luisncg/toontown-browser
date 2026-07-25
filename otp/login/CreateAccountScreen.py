@@ -1,6 +1,10 @@
+import json
+import time
+from datetime import datetime
+
 from panda3d.core import *
 from direct.gui.DirectGui import *
-from panda3d.core import *
+from direct.gui.OnscreenImage import OnscreenImage
 from direct.fsm import StateData
 from otp.otpgui import OTPDialog
 from direct.fsm import ClassicFSM
@@ -9,14 +13,17 @@ from direct.directnotify import DirectNotifyGlobal
 from otp.otpbase import OTPLocalizer
 from . import GuiScreen
 from otp.otpbase import OTPGlobals
+from otp.uberdog.AccountDetailRecord import AccountDetailRecord
 from direct.distributed.MsgTypes import *
 
 class CreateAccountScreen(StateData.StateData, GuiScreen.GuiScreen):
     notify = DirectNotifyGlobal.directNotify.newCategory('CreateAccountScreen')
     ActiveEntryColor = Vec4(1, 1, 1, 1)
     InactiveEntryColor = Vec4(0.8, 0.8, 0.8, 1)
-    labelFg = (1, 1, 1, 1)
+    labelFg = (0, 0, 0, 1)
     labelFgActive = (1, 1, 0, 1)
+    MinimumAccountNameLength = 3
+    MinimumPasswordLength = 8
 
     def __init__(self, cr, doneEvent):
         StateData.StateData.__init__(self, doneEvent)
@@ -32,39 +39,62 @@ class CreateAccountScreen(StateData.StateData, GuiScreen.GuiScreen):
         textScale = 0.1 * masterScale
         entryScale = 0.08 * masterScale
         lineHeight = 0.21 * masterScale
-        buttonScale = 1.3 * masterScale
-        buttonLineHeight = 0.16 * masterScale
-        self.frame = DirectFrame(parent=aspect2d, relief=None)
+        buttonScale = 1.05 * masterScale
+        nameBalloon = loader.loadModel('phase_3/models/props/chatbox_input')
+        guiButton = loader.loadModel('phase_3/models/gui/quit_button')
+        buttonImages = (guiButton.find('**/QuitBtn_UP'),
+                        guiButton.find('**/QuitBtn_DN'),
+                        guiButton.find('**/QuitBtn_RLVR'))
+        self.frame = DirectFrame(parent=aspect2d, relief=None, sortOrder=20)
         self.frame.hide()
-        linePos = 0.5
-        linePos -= lineHeight
-        self.nameLabel = DirectLabel(parent=self.frame, relief=None, pos=(-0.21, 0, linePos), text=OTPLocalizer.CreateAccountScreenUserName, text_scale=textScale, text_align=TextNode.ARight, text_fg=self.labelFg, text_shadow=(0, 0, 0, 1), text_shadowOffset=(0.08, 0.08))
-        self.nameEntry = DirectEntry(parent=self.frame, relief=DGG.SUNKEN, borderWidth=(0.1, 0.1), scale=entryScale, pos=(-0.125, 0.0, linePos), width=OTPGlobals.maxLoginWidth, numLines=1, focus=0, cursorKeys=1)
+
+        # Disney's in-client account screen did not include its own artwork;
+        # it was a raw form over the window clear color.  Reuse the preserved
+        # login presentation so creating an account remains visually connected
+        # to the screen that opened it.
+        self.cloudBackground = OnscreenImage(
+            parent=self.frame,
+            image='phase_3/maps/loading_bg_clouds.png',
+            scale=(base.getAspectRatio(), 1, 1),
+            sort=-20)
+        self.createAccountLogo = OnscreenImage(
+            parent=self.frame,
+            image='phase_3/maps/toontown-logo.png',
+            pos=(-0.029081, 0, 0.370693),
+            scale=(0.767107, 1, 0.314693),
+            sort=-10)
+        self.createAccountLogo.setTransparency(TransparencyAttrib.MAlpha)
+
+        linePos = -0.12
+        self.nameLabel = DirectLabel(parent=self.frame, relief=None, pos=(-0.21, 0, linePos), text=OTPLocalizer.CreateAccountScreenUserName, text_scale=textScale, text_align=TextNode.ARight, text_fg=self.labelFg)
+        self.nameEntry = DirectEntry(parent=self.frame, relief=None, image=nameBalloon, image1_color=self.InactiveEntryColor, scale=entryScale, pos=(-0.125, 0.0, linePos), width=OTPGlobals.maxLoginWidth, numLines=1, focus=0, cursorKeys=1)
         self.nameEntry.label = self.nameLabel
         linePos -= lineHeight
-        self.passwordLabel = DirectLabel(parent=self.frame, relief=None, pos=(-0.21, 0, linePos), text=OTPLocalizer.CreateAccountScreenPassword, text_scale=textScale, text_align=TextNode.ARight, text_fg=self.labelFg, text_shadow=(0, 0, 0, 1), text_shadowOffset=(0.08, 0.08))
-        self.passwordEntry = DirectEntry(parent=self.frame, relief=DGG.SUNKEN, borderWidth=(0.1, 0.1), scale=entryScale, pos=(-0.125, 0.0, linePos), width=OTPGlobals.maxLoginWidth, numLines=1, focus=0, cursorKeys=1, obscured=1)
+        self.passwordLabel = DirectLabel(parent=self.frame, relief=None, pos=(-0.21, 0, linePos), text=OTPLocalizer.CreateAccountScreenPassword, text_scale=textScale, text_align=TextNode.ARight, text_fg=self.labelFg)
+        self.passwordEntry = DirectEntry(parent=self.frame, relief=None, image=nameBalloon, image1_color=self.InactiveEntryColor, scale=entryScale, pos=(-0.125, 0.0, linePos), width=OTPGlobals.maxLoginWidth, numLines=1, focus=0, cursorKeys=1, obscured=1)
         self.passwordEntry.label = self.passwordLabel
         linePos -= lineHeight
-        self.passwordConfirmLabel = DirectLabel(parent=self.frame, relief=None, pos=(-0.21, 0, linePos), text=OTPLocalizer.CreateAccountScreenConfirmPassword, text_scale=textScale, text_align=TextNode.ARight, text_fg=self.labelFg, text_shadow=(0, 0, 0, 1), text_shadowOffset=(0.08, 0.08))
-        self.passwordConfirmEntry = DirectEntry(parent=self.frame, relief=DGG.SUNKEN, borderWidth=(0.1, 0.1), scale=entryScale, pos=(-0.125, 0.0, linePos), width=OTPGlobals.maxLoginWidth, numLines=1, focus=0, cursorKeys=1, obscured=1)
+        self.passwordConfirmLabel = DirectLabel(parent=self.frame, relief=None, pos=(-0.21, 0, linePos), text=OTPLocalizer.CreateAccountScreenConfirmPassword, text_scale=textScale, text_align=TextNode.ARight, text_fg=self.labelFg)
+        self.passwordConfirmEntry = DirectEntry(parent=self.frame, relief=None, image=nameBalloon, image1_color=self.InactiveEntryColor, scale=entryScale, pos=(-0.125, 0.0, linePos), width=OTPGlobals.maxLoginWidth, numLines=1, focus=0, cursorKeys=1, obscured=1)
         self.passwordConfirmEntry.label = self.passwordConfirmLabel
         linePos -= lineHeight
-        linePos -= lineHeight
-        self.submitButton = DirectButton(parent=self.frame, relief=DGG.RAISED, borderWidth=(0.01, 0.01), pos=(0, 0, linePos), scale=buttonScale, text=OTPLocalizer.CreateAccountScreenSubmit, text_scale=0.06, text_pos=(0, -0.02), command=self.__handleSubmit)
-        linePos -= buttonLineHeight
-        self.cancelButton = DirectButton(parent=self.frame, relief=DGG.RAISED, borderWidth=(0.01, 0.01), pos=(0, 0, linePos), scale=buttonScale, text=OTPLocalizer.CreateAccountScreenCancel, text_scale=0.06, text_pos=(0, -0.02), command=self.__handleCancel)
-        linePos -= buttonLineHeight
+        buttonImageScale = (1.4, 1.1, 1.1)
+        self.submitButton = DirectButton(parent=self.frame, relief=None, image=buttonImages, image_scale=buttonImageScale, pos=(-0.28, 0, linePos), scale=buttonScale, text=OTPLocalizer.CreateAccountScreenSubmit, text_scale=0.06, text_pos=(0, -0.02), command=self.__handleSubmit)
+        self.cancelButton = DirectButton(parent=self.frame, relief=None, image=buttonImages, image_scale=buttonImageScale, pos=(0.28, 0, linePos), scale=buttonScale, text=OTPLocalizer.CreateAccountScreenCancel, text_scale=0.06, text_pos=(0, -0.02), command=self.__handleCancel)
         self.dialogDoneEvent = 'createAccountDialogAck'
         dialogClass = OTPGlobals.getGlobalDialogClass()
-        self.dialog = dialogClass(dialogName='createAccountDialog', doneEvent=self.dialogDoneEvent, message='', style=OTPDialog.Acknowledge, sortOrder=NO_FADE_SORT_INDEX + 100)
+        self.dialog = dialogClass(dialogName='createAccountDialog', doneEvent=self.dialogDoneEvent, message='', style=OTPDialog.Acknowledge, sortOrder=DGG.NO_FADE_SORT_INDEX + 100)
         self.dialog.hide()
+        nameBalloon.removeNode()
+        guiButton.removeNode()
         return
 
     def unload(self):
         self.notify.debug('unload')
         self.dialog.cleanup()
         del self.dialog
+        self.createAccountLogo.destroy()
+        self.cloudBackground.destroy()
         self.frame.destroy()
         del self.fsm
         del self.loginInterface
@@ -113,8 +143,8 @@ class CreateAccountScreen(StateData.StateData, GuiScreen.GuiScreen):
         self.userName = self.nameEntry.get()
         self.password = self.passwordEntry.get()
         passwordConfirm = self.passwordConfirmEntry.get()
-        minNameLength = self.cr.accountServerConstants.getInt('minNameLength')
-        minPwdLength = self.cr.accountServerConstants.getInt('minPwLength')
+        minNameLength = self.MinimumAccountNameLength
+        minPwdLength = self.MinimumPasswordLength
         if self.userName == '':
             self.dialog.setMessage(OTPLocalizer.CreateAccountScreenNoAccountName)
             self.dialog.show()
@@ -136,6 +166,44 @@ class CreateAccountScreen(StateData.StateData, GuiScreen.GuiScreen):
 
     def __handleCancel(self):
         messenger.send(self.doneEvent, [{'mode': 'cancel'}])
+
+    def browserSetFormField(self, field, value):
+        """Mirror a native mobile input into the preserved DirectEntry."""
+        state = self.fsm.getCurrentState()
+        if state is None or state.getName() != 'create':
+            return False
+        entries = {
+            'username': self.nameEntry,
+            'password': self.passwordEntry,
+            'confirmPassword': self.passwordConfirmEntry,
+        }
+        entry = entries.get(field)
+        if entry is None or not isinstance(value, str):
+            return False
+        entry.enterText(value)
+        return True
+
+    def browserFocusFormField(self, field):
+        state = self.fsm.getCurrentState()
+        if state is None or state.getName() != 'create':
+            return False
+        entries = {
+            'username': self.nameEntry,
+            'password': self.passwordEntry,
+            'confirmPassword': self.passwordConfirmEntry,
+        }
+        entry = entries.get(field)
+        if entry is None:
+            return False
+        self.setFocus(entry)
+        return True
+
+    def browserSubmitForm(self):
+        state = self.fsm.getCurrentState()
+        if state is None or state.getName() != 'create':
+            return False
+        self.__handleSubmit()
+        return True
 
     def __handleUsernameAck(self):
         self.dialog.hide()
@@ -172,13 +240,77 @@ class CreateAccountScreen(StateData.StateData, GuiScreen.GuiScreen):
         self.cr.handler = None
         return
 
-    def handleWaitForLoginResponse(self, msgType, di):
-        if msgType == CLIENT_LOGIN_2_RESP:
-            self.handleLoginResponseMsg2(di)
-        elif msgType == CLIENT_LOGIN_RESP:
-            self.handleLoginResponseMsg(di)
-        else:
+    if not __astron__:
+        def handleWaitForLoginResponse(self, msgType, di):
+            if msgType == CLIENT_LOGIN_2_RESP:
+                self.handleLoginResponseMsg2(di)
+            elif msgType == CLIENT_LOGIN_RESP:
+                self.handleLoginResponseMsg(di)
+            else:
+                self.cr.handleMessageType(msgType, di)
+    else:
+        def handleWaitForLoginResponse(self, msgType, di):
+            # Astron login responses arrive as distributed-object updates, so
+            # let the repository dispatch them to AstronLoginManager.
             self.cr.handleMessageType(msgType, di)
+
+    def getExtendedErrorMsg(self, errorString):
+        prefix = 'Bad DC Version Compare'
+        if len(errorString) >= len(prefix) and errorString[:len(prefix)] == prefix:
+            return '%s, address=%s' % (
+                errorString, base.cr.getServerAddress())
+        return errorString
+
+    def handleLoginToontownResponse(self, responseBlob):
+        """Handle the browser Astron account response on the create screen."""
+        responseData = json.loads(responseBlob)
+        returnCode = responseData.get('returnCode')
+        errorString = self.getExtendedErrorMsg(
+            responseData.get('respString', ''))
+        if returnCode != 0:
+            self.notify.info('Account creation failed: %s' % errorString)
+            self.dialog.setMessage(
+                errorString or OTPLocalizer.CreateAccountScreenUserNameTaken)
+            self.dialog.show()
+            self.acceptOnce(
+                self.dialogDoneEvent, self.__handleBadAccountAck)
+            return
+
+        now = time.time()
+        self.cr.DISLIdFromLogin = responseData.get('accountNumber')
+        self.cr.accountDetailRecord = AccountDetailRecord()
+        createFriendsWithChat = responseData.get('createFriendsWithChat')
+        self.cr.secretChatAllowed = (
+            createFriendsWithChat == 'YES'
+            or createFriendsWithChat == 'CODE')
+        chatCodeCreationRule = responseData.get('chatCodeCreationRule')
+        self.cr.chatChatCodeCreationRule = chatCodeCreationRule
+        self.cr.secretChatNeedsParentPassword = (
+            chatCodeCreationRule == 'PARENT')
+        serverTime = responseData.get('serverTime', int(now))
+        self.cr.serverTimeUponLogin = serverTime
+        self.cr.clientTimeUponLogin = now
+        self.cr.globalClockRealTimeUponLogin = globalClock.getRealTime()
+        if hasattr(self.cr, 'toontownTimeManager'):
+            self.cr.toontownTimeManager.updateLoginTimes(
+                serverTime, now, self.cr.globalClockRealTimeUponLogin)
+        serverDelta = serverTime - now
+        self.cr.setServerDelta(serverDelta)
+        self.notify.setServerDelta(serverDelta, 28800)
+        isPaid = responseData.get('access') == 'FULL'
+        self.cr.parentPasswordSet = isPaid
+        self.cr.setIsPaid(isPaid)
+        if isPaid:
+            launcher.setPaidUserLoggedIn()
+        self.cr.whiteListChatEnabled = int(
+            responseData.get('WhiteListResponse') == 'YES')
+        self.cr.lastLoggedIn = datetime.now()
+        self.cr.accountDays = responseData.get('accountDays', 100000)
+        self.cr.withParentAccount = (
+            responseData.get('toonAccountType') == 'WITH_PARENT_ACCOUNT')
+        self.userName = responseData.get('userName', self.userName)
+        self.cr.userName = self.userName
+        self.__handleLoginSuccess()
 
     def handleLoginResponseMsg2(self, di):
         returnCode = di.getUint8()

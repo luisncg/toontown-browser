@@ -3,6 +3,7 @@ from panda3d.core import *
 from otp.chat import ChatInputNormal
 from otp.otpbase import OTPLocalizer
 from otp.otpbase import OTPGlobals
+from toontown.toonbase import KeybindSettings
 
 class TTChatInputNormal(ChatInputNormal.ChatInputNormal):
 
@@ -18,7 +19,7 @@ class TTChatInputNormal(ChatInputNormal.ChatInputNormal):
          -0.07,
          0.05), text=OTPLocalizer.ChatInputNormalWhisper, text_scale=0.04, text_fg=Vec4(0, 0, 0, 1), text_wordwrap=9.5, textMayChange=1)
         self.whisperLabel.hide()
-        self.chatEntry = DirectEntry(parent=self.chatFrame, relief=None, scale=0.05, pos=(-0.2, 0, 0.11), entryFont=OTPGlobals.getInterfaceFont(), width=8.6, numLines=3, cursorKeys=0, backgroundFocus=0, command=self.sendChat)
+        self.chatEntry = DirectEntry(parent=self.chatFrame, relief=None, scale=0.05, pos=(-0.2, 0, 0.11), entryFont=OTPGlobals.getInterfaceFont(), width=8.6, numLines=3, cursorKeys=0, backgroundFocus=0, suppressKeys=0, command=self.sendChat)
         self.chatEntry.bind(DGG.OVERFLOW, self.chatOverflow)
         self.chatEntry.bind(DGG.TYPE, self.typeCallback)
         return
@@ -35,6 +36,19 @@ class TTChatInputNormal(ChatInputNormal.ChatInputNormal):
         exec('from toontown.toonbase.ToonBaseGlobal import *', globals(), self.ExecNamespace)
 
     def typeCallback(self, extraArgs):
+        text = self.chatEntry.get()
+        chatActive = bool(self.chatEntry['focus'])
+        if (
+            not chatActive
+            and text
+            and KeybindSettings.isGameplayTypingKey(text[-1])
+        ):
+            typedKey = text[-1]
+            self.chatEntry.set(text[:-1])
+            KeybindSettings.reportChatInputForSmoke('suppressed', typedKey.lower())
+            return
+        KeybindSettings.reportChatInputForSmoke(
+            'active' if chatActive else 'opening', text)
         if localAvatar.chatMgr.chatInputWhiteList.isActive():
             return
         else:

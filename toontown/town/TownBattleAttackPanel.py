@@ -30,6 +30,7 @@ class TownBattleAttackPanel(StateData.StateData):
         if not AttackPanelHidden:
             base.localAvatar.inventory.show()
         self.accept('inventory-selection', self.__handleInventory)
+        self.accept('reactive-inventory-selection', self.__handleReactiveInventory)
         self.accept('inventory-run', self.__handleRun)
         self.accept('inventory-sos', self.__handleSOS)
         self.accept('inventory-pass', self.__handlePass)
@@ -40,6 +41,7 @@ class TownBattleAttackPanel(StateData.StateData):
     def exit(self):
         StateData.StateData.exit(self)
         self.ignore('inventory-selection')
+        self.ignore('reactive-inventory-selection')
         self.ignore('inventory-run')
         self.ignore('inventory-sos')
         self.ignore('inventory-pass')
@@ -78,6 +80,14 @@ class TownBattleAttackPanel(StateData.StateData):
             messenger.send(self.doneEvent, [doneStatus])
         else:
             self.notify.error("An item we don't have: track %s level %s was selected." % [track, level])
+
+    def __handleReactiveInventory(self, track, level):
+        doneStatus = {
+            'mode': 'Reactive',
+            'track': track,
+            'level': level,
+        }
+        messenger.send(self.doneEvent, [doneStatus])
 
     def __handleHide(self):
         if AttackPanelHidden:

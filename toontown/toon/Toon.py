@@ -47,6 +47,16 @@ LegsAnimDict = {}
 TorsoAnimDict = {}
 HeadAnimDict = {}
 Preloaded = []
+LongDogHeadAnimationFallbacks = (
+    'tutorial-neutral',
+    'left-point',
+    'right-point',
+    'right-point-start',
+    'give-props',
+    'give-props-start',
+    'right-hand',
+    'right-hand-start',
+)
 Phase3AnimList = (('neutral', 'neutral'), ('run', 'run'))
 Phase3_5AnimList = (('walk', 'walk'),
  ('teleport', 'teleport'),
@@ -385,6 +395,58 @@ def compileGlobalAnimList():
                     file = phaseStr + HeadDict[key] + anim[1]
                     HeadAnimDict[key][anim[0]] = file
 
+    # The preserved new-animation set does not contain these long-dog head
+    # tracks.  Its medium-dog equivalents use the same joint hierarchy and
+    # bind cleanly to the long-dog model, so use them instead of repeatedly
+    # requesting files that do not exist.  This keeps the long head model and
+    # only supplies the missing ear/pupil motion.
+    if ConfigVariableBool('want-new-anims', 1).value:
+        for animName in LongDogHeadAnimationFallbacks:
+            HeadAnimDict['dll'][animName] = HeadAnimDict['dls'][animName]
+
+
+def getMakeAToonAvatarPreloadAssets(dna):
+    """Return the phase-3 assets needed for one initial Make-a-Toon actor."""
+    assets = []
+
+    def addModel(path):
+        asset = ('model', path)
+        if asset not in assets:
+            assets.append(asset)
+
+    def addTexture(path):
+        asset = ('texture', path)
+        if asset not in assets:
+            assets.append(asset)
+
+    legPrefix = LegDict[dna.legs]
+    for lod in ('1000', '500', '250'):
+        addModel('phase_3' + legPrefix + lod)
+    addModel(LegsAnimDict[dna.legs]['neutral'])
+
+    torsoPrefix = TorsoDict[dna.torso]
+    torsoLods = ('1000',) if len(dna.torso) == 1 else (
+        '1000', '500', '250')
+    for lod in torsoLods:
+        addModel('phase_3' + torsoPrefix + lod)
+    addModel(TorsoAnimDict[dna.torso]['neutral'])
+
+    headKey = dna.head if dna.head[0] == 'd' else dna.head[0]
+    headPrefix = HeadDict[headKey]
+    for lod in ('1000', '500', '250'):
+        addModel('phase_3' + headPrefix + lod)
+    if dna.getAnimal() == 'dog':
+        addModel(HeadAnimDict[dna.head]['neutral'])
+
+    addModel('phase_3/models/props/drop_shadow')
+    addTexture(ToonDNA.Shirts[dna.topTex])
+    addTexture(ToonDNA.Sleeves[dna.sleeveTex])
+    if dna.getGender() == 'm':
+        addTexture(ToonDNA.BoyShorts[dna.botTex])
+    else:
+        addTexture(ToonDNA.GirlBottoms[dna.botTex][0])
+    return assets
+
 
 def loadDialog():
     loadPath = 'phase_3.5/audio/dial/'
@@ -459,6 +521,8 @@ def unloadDialog():
 class Toon(Avatar.Avatar, ToonHead):
     notify = DirectNotifyGlobal.directNotify.newCategory('Toon')
     afkTimeout = ConfigVariableInt('afk-timeout', 600).value
+    sprintAnimationSpeedContribution = ConfigVariableDouble(
+        'avatar-sprint-animation-speed-contribution', 0.4).value
 
     def __init__(self):
         try:
@@ -1371,6 +1435,15 @@ class Toon(Avatar.Avatar, ToonHead):
             else:
                 action = OTPGlobals.STAND_INDEX
             anim, rate = self.standWalkRunReverse[action]
+            if action == OTPGlobals.RUN_INDEX and forwardSpeed > OTPGlobals.ToonForwardSpeed:
+                # Sprint movement is 1.5x, but matching that ratio exactly
+                # makes the preserved run cycle look frantic.  Blend only a
+                # portion of the speed increase into the animation (1.2x for
+                # the default sprint) while still avoiding obvious sliding.
+                speedRatio = forwardSpeed / OTPGlobals.ToonForwardSpeed
+                rate *= 1.0 + (
+                    speedRatio - 1.0
+                ) * self.sprintAnimationSpeedContribution
             self.motion.enter()
             self.motion.setState(anim, rate)
             if anim != self.playingAnim:

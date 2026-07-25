@@ -115,6 +115,226 @@ def doShrug(toon, volume = 1):
     return (track, duration, None)
 
 
+SixtySevenFrame = 35
+SixtySevenArmJoints = (
+    'def_left_shoulder',
+    'def_left_elbow',
+    'def_left_wrist',
+    'def_right_shoulder',
+    'def_right_elbow',
+    'def_right_wrist')
+# Hold the upper-body/head chain at its starting orientation while the arms
+# move.  This prevents both Shrug's head shake and Neutral's idle head sway from
+# becoming part of the gesture.
+SixtySevenSteadyJoints = (
+    'root', 'def_spineB', 'def_cageA', 'def_neck', 'def_head')
+SixtySevenJoints = SixtySevenArmJoints + SixtySevenSteadyJoints
+SixtySevenLeftHigh = 35
+SixtySevenLeftLow = -18
+SixtySevenRightHigh = -10
+SixtySevenRightLow = 25
+SixtySevenLeftLowZ = 0.0
+SixtySevenRightHighZ = 0.17
+
+
+def _cleanupSixtySevenJoints(toon):
+    controllers = getattr(toon, '_sixtySevenJointControllers', None)
+    if not controllers:
+        return
+    for jointName in SixtySevenJoints:
+        toon.releaseJoint('torso', jointName)
+    for controller in controllers.values():
+        if not controller.isEmpty():
+            controller.removeNode()
+    del toon._sixtySevenJointControllers
+    if getattr(toon, '_browserEmote67Smoke', False):
+        print('[BrowserEmote67Test] cleanup')
+
+
+def _activateSixtySevenJoints(toon):
+    controllers = getattr(toon, '_sixtySevenJointControllers', {})
+    for jointName, controller in controllers.items():
+        toon.controlJoint(controller, 'torso', jointName)
+
+
+def _reportSixtySevenPose(toon, poseName):
+    if getattr(toon, '_browserEmote67Smoke', False):
+        print('[BrowserEmote67Test] ' + poseName)
+
+
+def _resumeSixtySevenTorso(toon, animName, playRate):
+    # The torso was posed at its exact pre-emote frame.  restart=0 resumes that
+    # animation control in place instead of jumping the idle loop back to zero.
+    currentAnim = getattr(toon, 'playingAnim', None)
+    if currentAnim and currentAnim != animName:
+        returnToLastAnim(toon)
+        return
+    toon.loop(animName, restart=0, partName='torso')
+    toon.setPlayRate(playRate, animName, partName='torso')
+    if getattr(toon, '_browserEmote67Smoke', False):
+        print('[BrowserEmote67Test] idle-frame-resumed=%s' %
+              toon.getCurrentFrame(animName, partName='torso'))
+
+
+def _prepareSixtySevenJoints(toon):
+    """Capture only Shrug's arm pose, leaving its neck/head motion behind."""
+    _cleanupSixtySevenJoints(toon)
+    lodNames = toon.getLODNames()
+    lodName = lodNames[0] if lodNames else 'lodRoot'
+    resumeAnim = getattr(toon, 'playingAnim', None)
+    if not resumeAnim:
+        if not hasattr(toon, 'hp') or toon.hp > 0:
+            resumeAnim = 'neutral'
+        else:
+            resumeAnim = 'sad-neutral'
+    resumeFrame = toon.getCurrentFrame(resumeAnim, partName='torso')
+    if resumeFrame is None:
+        resumeFrame = 0
+    resumeRate = toon.getPlayRate(resumeAnim, partName='torso')
+    if resumeRate is None:
+        resumeRate = 1.0
+    if getattr(toon, '_browserEmote67Smoke', False):
+        print('[BrowserEmote67Test] idle-frame-paused=%s' % resumeFrame)
+    toon.update(partName='torso', lodName=lodName, force=True)
+    startingTransforms = {
+        jointName: toon.getJointTransformState('torso', jointName, lodName)
+        for jointName in SixtySevenJoints}
+
+    toon.pose('shrug', SixtySevenFrame, partName='torso')
+    toon.update(partName='torso', lodName=lodName, force=True)
+    palmsUpTransforms = {
+        jointName: toon.getJointTransformState('torso', jointName, lodName)
+        for jointName in SixtySevenArmJoints}
+
+    # Pause the normal torso at precisely the frame captured above before
+    # taking control of the arm chain.  This avoids both Shrug's head motion and
+    # an invisible idle animation advancing underneath the emote.
+    toon.pose(resumeAnim, resumeFrame, partName='torso')
+    toon.update(partName='torso', lodName=lodName, force=True)
+    controllers = {}
+    for jointName in SixtySevenJoints:
+        controller = toon.attachNewNode(ModelNode('emote-67-' + jointName))
+        controller.setTransform(startingTransforms[jointName])
+        controllers[jointName] = controller
+    toon._sixtySevenJointControllers = controllers
+    return (controllers, startingTransforms, palmsUpTransforms,
+            resumeAnim, resumeRate)
+
+
+def doSixtySeven(toon, volume = 1):
+    """Alternate two palms-up hands in the familiar 67 seesaw gesture."""
+    controllers, startingTransforms, palmsUpTransforms, resumeAnim, \
+        resumeRate = \
+        _prepareSixtySevenJoints(toon)
+    left = controllers['def_left_shoulder']
+    right = controllers['def_right_shoulder']
+    leftBase = palmsUpTransforms['def_left_shoulder'].getHpr()
+    rightBase = palmsUpTransforms['def_right_shoulder'].getHpr()
+    leftBasePos = palmsUpTransforms['def_left_shoulder'].getPos()
+    rightBasePos = palmsUpTransforms['def_right_shoulder'].getPos()
+
+    def moveArms(transforms, duration):
+        return Parallel(*[
+            LerpQuatInterval(
+                controllers[jointName],
+                duration,
+                transforms[jointName].getQuat(),
+                blendType='easeInOut')
+            for jointName in SixtySevenArmJoints])
+
+    def seesaw(leftPitch, rightPitch, duration,
+               leftZ = 0.0, rightZ = 0.0):
+        return Parallel(
+            LerpHprInterval(
+                left,
+                duration,
+                leftBase + Vec3(0, leftPitch, 0),
+                blendType='easeInOut'),
+            LerpHprInterval(
+                right,
+                duration,
+                rightBase + Vec3(0, rightPitch, 0),
+                blendType='easeInOut'),
+            LerpPosInterval(
+                left,
+                duration,
+                leftBasePos + Vec3(0, 0, leftZ),
+                blendType='easeInOut'),
+            LerpPosInterval(
+                right,
+                duration,
+                rightBasePos + Vec3(0, 0, rightZ),
+                blendType='easeInOut'))
+
+    def enterFirstSeesaw(duration):
+        # Bend and rotate the elbows/wrists into their palms-up pose while the
+        # shoulders travel directly from the Toon's sides to the first
+        # left-high extreme.  There is no intermediate both-hands-up pose.
+        intervals = [
+            LerpQuatInterval(
+                controllers[jointName],
+                duration,
+                palmsUpTransforms[jointName].getQuat(),
+                blendType='easeInOut')
+            for jointName in SixtySevenArmJoints
+            if jointName not in (
+                'def_left_shoulder', 'def_right_shoulder')]
+        leftTarget = Quat()
+        leftTarget.setHpr(leftBase + Vec3(0, SixtySevenLeftHigh, 0))
+        rightTarget = Quat()
+        rightTarget.setHpr(rightBase + Vec3(0, SixtySevenRightLow, 0))
+        intervals.extend([
+            LerpQuatInterval(
+                left,
+                duration,
+                leftTarget,
+                blendType='easeInOut'),
+            LerpQuatInterval(
+                right,
+                duration,
+                rightTarget,
+                blendType='easeInOut')])
+        return Parallel(*intervals)
+
+    # Shrug frame 35 supplies only the bent elbows and upward-facing palms.  Its
+    # neck and head animation never plays.  The unequal neutral offsets
+    # compensate for the preserved arm pose's asymmetric hand heights.
+    firstPoseHold = \
+        0.20 if getattr(toon, '_browserEmote67Smoke', False) else 0.05
+    track = Sequence(
+        Func(_activateSixtySevenJoints, toon),
+        enterFirstSeesaw(0.24),
+        Func(_reportSixtySevenPose, toon, 'left-high'),
+        Wait(firstPoseHold),
+        seesaw(
+            SixtySevenLeftLow,
+            SixtySevenRightHigh,
+            0.18,
+            SixtySevenLeftLowZ,
+            SixtySevenRightHighZ),
+        Func(_reportSixtySevenPose, toon, 'right-high'),
+        Wait(firstPoseHold))
+    for unused in range(4):
+        track.append(seesaw(
+            SixtySevenLeftHigh, SixtySevenRightLow, 0.18))
+        track.append(Func(_reportSixtySevenPose, toon, 'left-high'))
+        track.append(Wait(0.05))
+        track.append(seesaw(
+            SixtySevenLeftLow,
+            SixtySevenRightHigh,
+            0.18,
+            SixtySevenLeftLowZ,
+            SixtySevenRightHighZ))
+        track.append(Func(_reportSixtySevenPose, toon, 'right-high'))
+        track.append(Wait(0.05))
+    track.append(seesaw(0, 0, 0.16))
+    exitTrack = Sequence(
+        moveArms(startingTransforms, 0.30),
+        Func(_cleanupSixtySevenJoints, toon),
+        Func(_resumeSixtySevenTorso, toon, resumeAnim, resumeRate))
+    return (track, 0, exitTrack)
+
+
 def doWave(toon, volume = 1):
     track = Sequence(Func(toon.play, 'wave'))
     duration = toon.getDuration('wave', 'torso')
@@ -457,7 +677,8 @@ EmoteFunc = [[doWave, 0],
  [doUpset, 0],
  [doDelighted, 0],
  [doFurious, 0],
- [doLaugh, 0]]
+ [doLaugh, 0],
+ [doSixtySeven, 0]]
 
 class TTEmote(Emote.Emote):
     notify = DirectNotifyGlobal.directNotify.newCategory('TTEmote')
@@ -484,7 +705,8 @@ class TTEmote(Emote.Emote):
          21,
          22,
          23,
-         24]
+         24,
+         25]
         self.headEmotes = [2,
          17,
          18,

@@ -16,6 +16,7 @@ import math
 from toontown.toonbase import ToontownAccess
 from toontown.toonbase import TTLocalizer
 from toontown.toonbase import ToontownBattleGlobals
+from toontown.toonbase import KeybindSettings
 from toontown.launcher import ToontownDownloadWatcher
 
 class ToonBase(OTPBase.OTPBase):
@@ -23,23 +24,25 @@ class ToonBase(OTPBase.OTPBase):
 
     def __init__(self):
         self.settings = Settings()
+        self.settings.readSettings()
+        KeybindSettings.applyToConfig(self.settings)
         if not ConfigVariableInt('ignore-user-options', 0).value:
-            self.settings.readSettings()
             mode = not self.settings.getSetting('windowed-mode', True)
             music = self.settings.getSetting('music', True)
             sfx = self.settings.getSetting('sfx', True)
             toonChatSounds = self.settings.getSetting('toon-chat-sounds', True)
-            res = self.settings.getSetting('resolution', (800, 600))
+            res = self.settings.getSetting('resolution', (1024, 768))
             if mode == None:
                 mode = 1
             if res == None:
-                res = (800, 600)
+                res = (1024, 768)
             loadPrcFileData('toonBase Settings Window Res', 'win-size %s %s' % (res[0], res[1]))
             loadPrcFileData('toonBase Settings Window FullScreen', 'fullscreen %s' % mode)
             loadPrcFileData('toonBase Settings Music Active', 'audio-music-active %s' % music)
             loadPrcFileData('toonBase Settings Sound Active', 'audio-sfx-active %s' % sfx)
             loadPrcFileData('toonBase Settings Toon Chat Sounds', 'toon-chat-sounds %s' % toonChatSounds)
         OTPBase.OTPBase.__init__(self)
+        self.setFrameRateMeter(bool(self.settings.getSetting('show-fps', False)))
         if not self.isMainWindowOpen():
             try:
                 launcher.setPandaErrorCode(7)
@@ -293,11 +296,18 @@ class ToonBase(OTPBase.OTPBase):
     def startShow(self, cr, launcherServer = None):
         self.cr = cr
         base.graphicsEngine.renderFrame()
-        self.downloadWatcher = ToontownDownloadWatcher.ToontownDownloadWatcher(TTLocalizer.LauncherPhaseNames)
-        if launcher.isDownloadComplete():
-            self.cleanupDownloadWatcher()
+        if (hasattr(launcher, 'isBrowserStreaming')
+                and launcher.isBrowserStreaming()):
+            # Browser phase packages are deliberately downloaded in the
+            # background.  The preserved launcher watcher would otherwise
+            # display the last idle phase ("Parties") at 0% throughout login.
+            self.downloadWatcher = None
         else:
-            self.acceptOnce('launcherAllPhasesComplete', self.cleanupDownloadWatcher)
+            self.downloadWatcher = ToontownDownloadWatcher.ToontownDownloadWatcher(TTLocalizer.LauncherPhaseNames)
+            if launcher.isDownloadComplete():
+                self.cleanupDownloadWatcher()
+            else:
+                self.acceptOnce('launcherAllPhasesComplete', self.cleanupDownloadWatcher)
         gameServer = ConfigVariableString('game-server', '').value
         if gameServer:
             self.notify.info('Using game-server from Configrc: %s ' % gameServer)

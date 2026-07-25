@@ -219,6 +219,8 @@ class DistributedFishingSpot(DistributedObject.DistributedObject):
         else:
             self.collSphere.setTangible(1)
             if self.avId == base.localAvatar.doId:
+                self.notify.info(
+                    'Local Toon occupied fishing spot %s' % self.doId)
                 base.setCellsAvailable(base.bottomCells, 0)
                 self.localToonFishing = 1
                 if base.wantBingo:

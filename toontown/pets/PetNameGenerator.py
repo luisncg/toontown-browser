@@ -24,6 +24,9 @@ class PetNameGenerator:
         if AppRunnerGlobal.appRunner:
             searchPath.appendDirectory(Filename.expandFrom('$TT_3_ROOT/phase_3/etc'))
         else:
+            # The browser port and native local stack keep phase assets under
+            # the repository's explicit resources root.
+            searchPath.appendDirectory(Filename('resources/phase_3/etc'))
             searchPath.appendDirectory(Filename('phase_3/etc'))
             if os.path.expandvars('$TOONTOWN') != '':
                 searchPath.appendDirectory(Filename.fromOsSpecific(os.path.expandvars('$TOONTOWN/src/configfiles')))
@@ -37,6 +40,8 @@ class PetNameGenerator:
         input = StreamReader(vfs.openReadFile(filename, 1), 1)
         currentLine = input.readline()
         while currentLine:
+            if isinstance(currentLine, bytes):
+                currentLine = currentLine.decode('utf-8')
             if currentLine.lstrip()[0:1] != '#':
                 a1 = currentLine.find('*')
                 a2 = currentLine.find('*', a1 + 1)

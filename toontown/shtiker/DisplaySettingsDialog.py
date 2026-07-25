@@ -379,6 +379,7 @@ class DisplaySettingsDialog(DirectFrame, StateData.StateData):
         self.setBin('gui-popup', 0)
         base.transitions.fadeScreen(0.5)
         if command == DGG.DIALOG_OK:
+            self.notify.info('DISPLAY CHANGE ACCEPTED')
             self.anyChanged = 1
             self.exit()
             return
@@ -389,6 +390,7 @@ class DisplaySettingsDialog(DirectFrame, StateData.StateData):
         if not self.resetDisplayProperties(self.origPipe, self.origProperties):
             self.notify.warning("Couldn't restore original display settings!")
             base.panda3dRenderError()
+        self.notify.info('DISPLAY CHANGE REVERTED')
         self.clearBin()
         if reason == 0:
             revertText = TTLocalizer.DisplaySettingsRevertUser

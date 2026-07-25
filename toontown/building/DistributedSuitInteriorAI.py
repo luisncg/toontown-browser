@@ -18,7 +18,8 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.air = air
         DistributedObjectAI.DistributedObjectAI.__init__(self, air)
         self.extZoneId, self.zoneId = elevator.bldg.getExteriorAndInteriorZoneId()
-        self.numFloors = elevator.bldg.planner.numFloors
+        self.planner = getattr(elevator, 'tripPlanner', elevator.bldg.planner)
+        self.numFloors = self.planner.numFloors
         self.avatarExitEvents = []
         self.toons = []
         self.toonSkillPtsGained = {}
@@ -48,7 +49,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.toonIds = copy.copy(elevator.seats)
         for toonId in self.toonIds:
             if toonId != None:
-                self.__addToon(toonId)
+                self._addToon(toonId)
 
         self.savedByMap = {}
         self.fsm = ClassicFSM.ClassicFSM('DistributedSuitInteriorAI', [
@@ -57,7 +58,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
          State.State('Elevator', self.enterElevator, self.exitElevator, [
           'Battle']),
          State.State('Battle', self.enterBattle, self.exitBattle, [
-          'ReservesJoining', 'BattleDone']),
+          'ReservesJoining', 'BattleDone', 'Resting', 'Reward']),
          State.State('ReservesJoining', self.enterReservesJoining, self.exitReservesJoining, [
           'Battle']),
          State.State('BattleDone', self.enterBattleDone, self.exitBattleDone, [
@@ -81,14 +82,14 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         del self.elevator
         self.timer.stop()
         del self.timer
-        self.__cleanupFloorBattle()
+        self._cleanupFloorBattle()
         taskName = self.taskName('deleteInterior')
         taskMgr.remove(taskName)
         DistributedObjectAI.DistributedObjectAI.delete(self)
 
     def __handleUnexpectedExit(self, toonId):
         self.notify.warning('toon: %d exited unexpectedly' % toonId)
-        self.__removeToon(toonId)
+        self._removeToon(toonId)
         if len(self.toons) == 0:
             self.timer.stop()
             if self.fsm.getCurrentState().getName() == 'Resting':
@@ -97,7 +98,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
                 self.bldg.deleteSuitInterior()
         return
 
-    def __addToon(self, toonId):
+    def _addToon(self, toonId):
         if toonId not in self.air.doId2do:
             self.notify.warning('addToon() - no toon for doId: %d' % toonId)
             return
@@ -107,7 +108,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.toons.append(toonId)
         self.responses[toonId] = 0
 
-    def __removeToon(self, toonId):
+    def _removeToon(self, toonId):
         if self.toons.count(toonId):
             self.toons.remove(toonId)
         if self.toonIds.count(toonId):
@@ -118,16 +119,20 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         if self.avatarExitEvents.count(event):
             self.avatarExitEvents.remove(event)
         self.ignore(event)
+        self._onToonSeatsChanged()
         return
 
-    def __resetResponses(self):
+    def _onToonSeatsChanged(self):
+        pass
+
+    def _resetResponses(self):
         self.responses = {}
         for toon in self.toons:
             self.responses[toon] = 0
 
         self.ignoreResponses = 0
 
-    def __allToonsResponded(self):
+    def _allToonsResponded(self):
         for toon in self.toons:
             if self.responses[toon] == 0:
                 return 0
@@ -202,7 +207,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
             self.savedByMap[avId] = (
              avatar.getName(), avatar.dna.asTuple())
         self.responses[avId] += 1
-        if self.__allToonsResponded():
+        if self._allToonsResponded():
             self.fsm.request('Elevator')
         return
 
@@ -219,7 +224,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
                     self.notify.warning('elevatorDone() - toon not in toon list: %d' % toonId)
                     return
         self.responses[toonId] += 1
-        if self.__allToonsResponded() and self.ignoreElevatorDone == 0:
+        if self._allToonsResponded() and self.ignoreElevatorDone == 0:
             self.b_setState('Battle')
 
     def reserveJoinDone(self):
@@ -235,7 +240,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
                     self.notify.warning('reserveJoinDone() - toon not in list: %d' % toonId)
                     return
         self.responses[toonId] += 1
-        if self.__allToonsResponded() and self.ignoreReserveJoinDone == 0:
+        if self._allToonsResponded() and self.ignoreReserveJoinDone == 0:
             self.b_setState('Battle')
 
     def enterOff(self):
@@ -245,15 +250,15 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         return None
 
     def enterWaitForAllToonsInside(self):
-        self.__resetResponses()
+        self._resetResponses()
         return None
 
     def exitWaitForAllToonsInside(self):
-        self.__resetResponses()
+        self._resetResponses()
         return None
 
     def enterElevator(self):
-        suitHandles = self.bldg.planner.genFloorSuits(self.currentFloor)
+        suitHandles = self.planner.genFloorSuits(self.currentFloor)
         self.suits = suitHandles['activeSuits']
         self.activeSuits = []
         for suit in self.suits:
@@ -262,7 +267,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.reserveSuits = suitHandles['reserveSuits']
         self.d_setToons()
         self.d_setSuits()
-        self.__resetResponses()
+        self._resetResponses()
         self.d_setState('Elevator')
         self.timer.startCallback(BattleBase.ELEVATOR_T + ElevatorData[ELEVATOR_NORMAL]['openTime'] + BattleBase.SERVER_BUFFER_TIME, self.__serverElevatorDone)
         return None
@@ -273,15 +278,17 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
 
     def exitElevator(self):
         self.timer.stop()
-        self.__resetResponses()
+        self._resetResponses()
         return None
 
-    def __createFloorBattle(self):
+    def _createFloorBattle(self):
         if self.currentFloor == self.topFloor:
             bossBattle = 1
         else:
             bossBattle = 0
-        self.battle = DistributedBattleBldgAI.DistributedBattleBldgAI(self.air, self.zoneId, self.__handleRoundDone, self.__handleBattleDone, bossBattle=bossBattle)
+        self.battle = DistributedBattleBldgAI.DistributedBattleBldgAI(
+            self.air, self.zoneId, self._handleRoundDone,
+            self._handleBattleDone, bossBattle=bossBattle)
         self.battle.suitsKilled = self.suitsKilled
         self.battle.suitsKilledPerFloor = self.suitsKilledPerFloor
         self.battle.battleCalc.toonSkillPtsGained = self.toonSkillPtsGained
@@ -299,7 +306,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
             mult *= getInvasionMultiplier()
         self.battle.battleCalc.setSkillCreditMultiplier(mult)
 
-    def __cleanupFloorBattle(self):
+    def _cleanupFloorBattle(self):
         for suit in self.suits:
             self.notify.debug('cleaning up floor suit: %d' % suit.doId)
             if suit.isDeleted():
@@ -315,7 +322,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.battle = None
         return
 
-    def __handleRoundDone(self, toonIds, totalHp, deadSuits):
+    def _handleRoundDone(self, toonIds, totalHp, deadSuits):
         totalMaxHp = 0
         for suit in self.suits:
             totalMaxHp += suit.maxHP
@@ -344,7 +351,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         else:
             self.battle.resume()
 
-    def __handleBattleDone(self, zoneId, toonIds):
+    def _handleBattleDone(self, zoneId, toonIds):
         if len(toonIds) == 0:
             taskName = self.taskName('deleteInterior')
             taskMgr.doMethodLater(10, self.__doDeleteInterior, taskName)
@@ -359,7 +366,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
 
     def enterBattle(self):
         if self.battle == None:
-            self.__createFloorBattle()
+            self._createFloorBattle()
             self.elevator.d_setFloor(self.currentFloor)
         return None
 
@@ -367,7 +374,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         return None
 
     def enterReservesJoining(self):
-        self.__resetResponses()
+        self._resetResponses()
         self.timer.startCallback(ElevatorData[ELEVATOR_NORMAL]['openTime'] + SUIT_HOLD_ELEVATOR_TIME + BattleBase.SERVER_BUFFER_TIME, self.__serverReserveJoinDone)
         return None
 
@@ -377,7 +384,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
 
     def exitReservesJoining(self):
         self.timer.stop()
-        self.__resetResponses()
+        self._resetResponses()
         for info in self.joinedReserves:
             self.battle.suitRequestJoin(info[0])
 
@@ -393,7 +400,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
                     deadToons.append(toon)
 
             for toon in deadToons:
-                self.__removeToon(toon)
+                self._removeToon(toon)
 
         self.d_setToons()
         if len(self.toons) == 0:
@@ -406,14 +413,15 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         return None
 
     def exitBattleDone(self):
-        self.__cleanupFloorBattle()
+        self._cleanupFloorBattle()
         return None
 
     def __handleEnterElevator(self):
         self.fsm.request('Elevator')
 
     def enterResting(self):
-        self.intElevator = DistributedElevatorIntAI.DistributedElevatorIntAI(self.air, self, self.toons)
+        self.intElevator = DistributedElevatorIntAI.DistributedElevatorIntAI(
+            self.air, self, self.toons, seatCount=len(self.toonIds))
         self.intElevator.generateWithRequired(self.zoneId)
         return None
 
@@ -430,17 +438,17 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
                 self.notify.warning('unexpected state for DistributedSuitInteriorAI.handleAllAboard(). Current State = %s' % currState)
                 return
         numOfEmptySeats = seats.count(None)
-        if numOfEmptySeats == 4:
+        if numOfEmptySeats == len(seats):
             self.bldg.deleteSuitInterior()
             return
         else:
-            if numOfEmptySeats >= 0 and numOfEmptySeats <= 3:
+            if numOfEmptySeats >= 0 and numOfEmptySeats < len(seats):
                 pass
             else:
                 self.error('Bad number of empty seats: %s' % numOfEmptySeats)
         for toon in self.toons:
             if seats.count(toon) == 0:
-                self.__removeToon(toon)
+                self._removeToon(toon)
 
         self.toonIds = copy.copy(seats)
         self.toons = []
@@ -448,6 +456,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
             if toonId != None:
                 self.toons.append(toonId)
 
+        self._onToonSeatsChanged()
         self.d_setToons()
         self.currentFloor += 1
         self.fsm.request('Elevator')

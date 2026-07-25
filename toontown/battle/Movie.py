@@ -14,6 +14,7 @@ from . import MovieThrow
 from . import MovieSquirt
 from . import MovieDrop
 from . import MovieSuitAttacks
+from . import MovieReactive
 from . import MovieToonVictory
 from . import PlayByPlayText
 from . import BattleParticles
@@ -29,8 +30,19 @@ from toontown.toonbase import ToontownGlobals
 from toontown.toontowngui import TTDialog
 import copy
 import functools
+import time
 from toontown.toonbase import TTLocalizer
 from toontown.toon import NPCToons
+from toontown.quest import QuestParser
+from .ReactiveGagGlobals import (
+    EMBARRASS_TRACK,
+    REACTIVE_RESULT_SUCCESS,
+    isReactiveTrack,
+)
+try:
+    import browser_audio
+except ImportError:
+    browser_audio = None
 camPos = Point3(14, 0, 10)
 camHpr = Vec3(89, -30, 0)
 randomBattleTimestamp = base.config.GetBool('random-battle-timestamp', 0)
@@ -41,6 +53,7 @@ class Movie(DirectObject.DirectObject):
     def __init__(self, battle):
         self.battle = battle
         self.track = None
+        self._browserAudioLease = None
         self.rewardPanel = None
         self.rewardCallback = None
         self.playByPlayText = PlayByPlayText.PlayByPlayText()
@@ -51,6 +64,21 @@ class Movie(DirectObject.DirectObject):
         self.rewardHasBeenReset = 0
         self.resetReward()
         return
+
+    def _recordBrowserTutorialRewardStep(self, command, step):
+        print('[BrowserPerformanceCommand] tutorial_reward %s %s' % (
+            command, step))
+
+    def _deleteTutorialRewardTom(self):
+        tutorialTom = getattr(self, 'tutorialTom', None)
+        if tutorialTom is None:
+            return
+        try:
+            tutorialTom.removeActive()
+        except Exception:
+            pass
+        tutorialTom.delete()
+        self.tutorialTom = None
 
     def cleanup(self):
         self.reset()
@@ -188,7 +216,33 @@ class Movie(DirectObject.DirectObject):
         if self.track:
             DelayDelete.cleanupDelayDeletes(self.track)
             self.track = None
+        self._releaseBrowserAudioLease('delete-track')
         return
+
+    def _acquireBrowserAudioLease(self):
+        if browser_audio is None:
+            return None
+        self._releaseBrowserAudioLease('superseded')
+        movieId = 'battle-%s' % getattr(self.battle, 'doId', 0)
+        self._browserAudioLease = browser_audio.acquire_battle_lease(
+            movieId)
+        return self._browserAudioLease
+
+    def _releaseBrowserAudioLease(self, reason, expectedToken=None):
+        token = self._browserAudioLease
+        if token is None:
+            return
+        if expectedToken is not None and token != expectedToken:
+            return
+        self._browserAudioLease = None
+        if browser_audio is not None:
+            browser_audio.release_battle_lease(token, reason)
+
+    def _finishBrowserBattleMovie(self, callback, leaseToken):
+        try:
+            callback()
+        finally:
+            self._releaseBrowserAudioLease('finish', leaseToken)
 
     def reset(self, finish = 0):
         if self.hasBeenReset == 1:
@@ -225,6 +279,7 @@ class Movie(DirectObject.DirectObject):
         return
 
     def play(self, ts, callback):
+        playStartedAt = time.perf_counter()
         self.hasBeenReset = 0
         ptrack = Sequence()
         camtrack = Sequence()
@@ -235,16 +290,27 @@ class Movie(DirectObject.DirectObject):
         for s in self.battle.activeSuits:
             s.battleTrapIsFresh = 0
 
+        stageStartedAt = time.perf_counter()
         tattacks, tcam = self.__doToonAttacks()
+        print('[BrowserPerformanceBattleStage] toon_movie %s' % int(
+            (time.perf_counter() - stageStartedAt) * 1000.0))
         if tattacks:
             ptrack.append(tattacks)
             camtrack.append(tcam)
+        stageStartedAt = time.perf_counter()
         sattacks, scam = self.__doSuitAttacks()
+        print('[BrowserPerformanceBattleStage] suit_movie %s' % int(
+            (time.perf_counter() - stageStartedAt) * 1000.0))
         if sattacks:
             ptrack.append(sattacks)
             camtrack.append(scam)
-        ptrack.append(Func(callback))
         self._deleteTrack()
+        leaseToken = self._acquireBrowserAudioLease()
+        if leaseToken is None:
+            ptrack.append(Func(callback))
+        else:
+            ptrack.append(Func(
+                self._finishBrowserBattleMovie, callback, leaseToken))
         self.track = Sequence(ptrack, name='movie-track-%d' % self.battle.doId)
         if self.battle.localToonPendingOrActive():
             self.track = Parallel(self.track, Sequence(camtrack), name='movie-track-with-cam-%d' % self.battle.doId)
@@ -259,11 +325,21 @@ class Movie(DirectObject.DirectObject):
         for toon in self.battle.toons:
             self.track.delayDeletes.append(DelayDelete.DelayDelete(toon, 'Movie.play'))
 
-        self.track.start(ts)
+        try:
+            self.track.start(ts)
+        except Exception:
+            self._releaseBrowserAudioLease('start-error', leaseToken)
+            raise
+        print('[BrowserPerformanceBattleStage] play_total %s' % int(
+            (time.perf_counter() - playStartedAt) * 1000.0))
         return None
 
     def finish(self):
-        self.track.finish()
+        leaseToken = self._browserAudioLease
+        try:
+            self.track.finish()
+        finally:
+            self._releaseBrowserAudioLease('forced-finish', leaseToken)
         return None
 
     def playReward(self, ts, name, callback, noSkip = False):
@@ -292,6 +368,7 @@ class Movie(DirectObject.DirectObject):
         return None
 
     def playTutorialReward(self, ts, name, callback):
+        self._recordBrowserTutorialRewardStep('interface', 1)
         self.rewardHasBeenReset = 0
         self.rewardPanel = RewardPanel.RewardPanel(name)
         self.rewardCallback = callback
@@ -307,6 +384,8 @@ class Movie(DirectObject.DirectObject):
         self.tutRewardDialog_1.hide()
         self._deleteTrack()
         self.track = Sequence(name='tutorial-reward-1')
+        self.track.append(Func(
+            self._recordBrowserTutorialRewardStep, 'interface', 2))
         self.track.append(Func(self.rewardPanel.initGagFrame, base.localAvatar, [0,
          0,
          0,
@@ -318,6 +397,8 @@ class Movie(DirectObject.DirectObject):
          0,
          0], noSkip=True))
         self.track += self.rewardPanel.getTrackIntervalList(base.localAvatar, THROW_TRACK, 0, 1, 0)
+        self.track.append(Func(
+            self._recordBrowserTutorialRewardStep, 'dialogue', 3))
         self.track.append(Func(self.tutRewardDialog_1.show))
         self.track.start()
         return
@@ -328,13 +409,18 @@ class Movie(DirectObject.DirectObject):
         self.tutRewardDialog_2.hide()
         self._deleteTrack()
         self.track = Sequence(name='tutorial-reward-2')
+        self.track.append(Func(
+            self._recordBrowserTutorialRewardStep, 'interface', 4))
         self.track.append(Wait(1.0))
         self.track += self.rewardPanel.getTrackIntervalList(base.localAvatar, SQUIRT_TRACK, 0, 1, 0)
+        self.track.append(Func(
+            self._recordBrowserTutorialRewardStep, 'dialogue', 5))
         self.track.append(Func(self.tutRewardDialog_2.show))
         self.track.start()
         return
 
     def playTutorialReward_3(self, value):
+        self._recordBrowserTutorialRewardStep('load', 6)
         self.tutRewardDialog_2.cleanup()
         from toontown.toon import Toon
         from toontown.toon import ToonDNA
@@ -349,11 +435,24 @@ class Movie(DirectObject.DirectObject):
         def uniqueName(hook):
             return 'TutorialTom-' + hook
 
-        self.tutorialTom = Toon.Toon()
-        dna = ToonDNA.ToonDNA()
-        dnaList = ('dll', 'ms', 'm', 'm', 7, 0, 7, 7, 2, 6, 2, 6, 2, 16)
-        dna.newToonFromProperties(*dnaList)
-        self.tutorialTom.setDNA(dna)
+        self.tutorialTom = QuestParser.takeTutorialRewardActor()
+        if self.tutorialTom is None:
+            # Safe fallback for unusual debug entry points that skip the
+            # tutorial interior preload.
+            self.tutorialTom = Toon.Toon()
+            dna = ToonDNA.ToonDNA()
+            dnaList = ('dll', 'ms', 'm', 'm', 7, 0, 7, 7, 2, 6, 2, 6, 2, 16)
+            dna.newToonFromProperties(*dnaList)
+            self.tutorialTom.setDNA(dna)
+            QuestParser.primeAnimationControls(
+                self.tutorialTom,
+                QuestParser.prepareAnimationControls(
+                    self.tutorialTom,
+                    ('neutral', 'right-hand-start', 'right-hand',
+                     'teleport', 'jump'),
+                ),
+            )
+        self._recordBrowserTutorialRewardStep('load', 7)
         self.tutorialTom.setName(TTLocalizer.NPCToonNames[20000])
         self.tutorialTom.uniqueName = uniqueName
         if base.config.GetString('language', 'english') == 'japanese':
@@ -368,90 +467,160 @@ class Movie(DirectObject.DirectObject):
             self.musicVolume = 0.9
         music = base.cr.playGame.place.loader.battleMusic
         if self.questList:
-            self.track1 = Sequence(Wait(1.0), Func(self.rewardPanel.initQuestFrame, base.localAvatar, copy.deepcopy(base.localAvatar.quests)), Wait(1.0), Sequence(*self.questList), Wait(1.0), Func(self.rewardPanel.hide), Func(camera.setPosHpr, render, 34, 19.88, 3.48, -90, -2.36, 0), Func(base.localAvatar.animFSM.request, 'neutral'), Func(base.localAvatar.setPosHpr, 40.31, 22.0, -0.47, 150.0, 360.0, 0.0), Wait(0.5), Func(self.tutorialTom.reparentTo, render), Func(self.tutorialTom.show), Func(self.tutorialTom.setPosHpr, 40.29, 17.9, -0.47, 11.31, 0.0, 0.07), Func(self.tutorialTom.animFSM.request, 'TeleportIn'), Wait(1.517), Func(self.tutorialTom.animFSM.request, 'neutral'), Func(self.acceptOnce, self.tutorialTom.uniqueName('doneChatPage'), doneChat1), Func(self.tutorialTom.addActive), Func(music.setVolume, self.musicVolume), Func(self.tutorialTom.setLocalPageChat, TTLocalizer.MovieTutorialReward3, 0, None, [self.tomDialogue03]), name='tutorial-reward-3a')
-            self.track2 = Sequence(Func(self.acceptOnce, self.tutorialTom.uniqueName('doneChatPage'), doneChat2), Func(self.tutorialTom.setLocalPageChat, TTLocalizer.MovieTutorialReward4, 1, None, [self.tomDialogue04]), Func(self.tutorialTom.setPlayRate, 1.5, 'right-hand-start'), Func(self.tutorialTom.play, 'right-hand-start'), Wait(self.tutorialTom.getDuration('right-hand-start') / 1.5), Func(self.tutorialTom.loop, 'right-hand'), name='tutorial-reward-3b')
-            self.track3 = Parallel(Sequence(Func(self.tutorialTom.setPlayRate, -1.8, 'right-hand-start'), Func(self.tutorialTom.play, 'right-hand-start'), Wait(self.tutorialTom.getDuration('right-hand-start') / 1.8), Func(self.tutorialTom.animFSM.request, 'neutral'), name='tutorial-reward-3ca'), Sequence(Wait(0.5), Func(self.tutorialTom.setChatAbsolute, TTLocalizer.MovieTutorialReward5, CFSpeech | CFTimeout, self.tomDialogue05), Wait(1.0), Func(self.tutorialTom.animFSM.request, 'TeleportOut'), Wait(self.tutorialTom.getDuration('teleport')), Wait(1.0), Func(self.playTutorialReward_4, 0), name='tutorial-reward-3cb'), name='tutorial-reward-3c')
+            self.track1 = Sequence(Wait(1.0), Func(self._recordBrowserTutorialRewardStep, 'interface', 8), Func(self.rewardPanel.initQuestFrame, base.localAvatar, copy.deepcopy(base.localAvatar.quests)), Wait(1.0), Sequence(*self.questList), Wait(1.0), Func(self.rewardPanel.hide), Func(self._recordBrowserTutorialRewardStep, 'transform', 9), Func(camera.setPosHpr, render, 34, 19.88, 3.48, -90, -2.36, 0), Func(base.localAvatar.animFSM.request, 'neutral'), Func(base.localAvatar.setPosHpr, 40.31, 22.0, -0.47, 150.0, 360.0, 0.0), Wait(0.5), Func(self.tutorialTom.reparentTo, render), Func(self.tutorialTom.show), Func(self.tutorialTom.setPosHpr, 40.29, 17.9, -0.47, 11.31, 0.0, 0.07), Func(self._recordBrowserTutorialRewardStep, 'animation', 10), Func(self.tutorialTom.animFSM.request, 'TeleportIn'), Wait(1.517), Func(self.tutorialTom.animFSM.request, 'neutral'), Func(self.acceptOnce, self.tutorialTom.uniqueName('doneChatPage'), doneChat1), Func(self.tutorialTom.addActive), Func(music.setVolume, self.musicVolume), Func(self._recordBrowserTutorialRewardStep, 'dialogue', 11), Func(self.tutorialTom.setLocalPageChat, TTLocalizer.MovieTutorialReward3, 0, None, [self.tomDialogue03]), name='tutorial-reward-3a')
+            rightHandStartDuration = QuestParser.getActorAnimationDuration(
+                self.tutorialTom, 'right-hand-start')
+            teleportDuration = QuestParser.getActorAnimationDuration(
+                self.tutorialTom, 'teleport')
+            self.track2 = Sequence(Func(self.acceptOnce, self.tutorialTom.uniqueName('doneChatPage'), doneChat2), Func(self._recordBrowserTutorialRewardStep, 'dialogue', 12), Func(self.tutorialTom.setLocalPageChat, TTLocalizer.MovieTutorialReward4, 1, None, [self.tomDialogue04]), Func(self._recordBrowserTutorialRewardStep, 'animation', 13), Func(QuestParser.playActorAnimation, self.tutorialTom, 'right-hand-start', 1.5, False), Wait(rightHandStartDuration / 1.5), Func(QuestParser.playActorAnimation, self.tutorialTom, 'right-hand', 1.0, True), name='tutorial-reward-3b')
+            self.track3 = Parallel(Sequence(Func(self._recordBrowserTutorialRewardStep, 'animation', 14), Func(QuestParser.playActorAnimation, self.tutorialTom, 'right-hand-start', -1.8, False), Wait(rightHandStartDuration / 1.8), Func(self.tutorialTom.animFSM.request, 'neutral'), name='tutorial-reward-3ca'), Sequence(Wait(0.5), Func(self._recordBrowserTutorialRewardStep, 'dialogue', 15), Func(self.tutorialTom.setChatAbsolute, TTLocalizer.MovieTutorialReward5, CFSpeech | CFTimeout, self.tomDialogue05), Wait(1.0), Func(self._recordBrowserTutorialRewardStep, 'animation', 16), Func(self.tutorialTom.animFSM.request, 'TeleportOut'), Wait(teleportDuration), Wait(1.0), Func(self.playTutorialReward_4, 0), name='tutorial-reward-3cb'), name='tutorial-reward-3c')
             self.track1.start()
         else:
             self.playTutorialReward_4(0)
         return
 
     def playTutorialReward_4(self, value):
+        self._recordBrowserTutorialRewardStep('finish', 17)
         base.localAvatar.setH(270)
-        self.tutorialTom.removeActive()
-        self.tutorialTom.delete()
+        self._deleteTutorialRewardTom()
         self.questList = None
         self.rewardCallback()
+        print('[BrowserPerformanceCommand] other idle 0')
         return
 
     def stop(self):
-        if self.track:
-            self.track.finish()
-            self._deleteTrack()
-        if hasattr(self, 'track1'):
-            self.track1.finish()
-            self.track1 = None
-        if hasattr(self, 'track2'):
-            self.track2.finish()
-            self.track2 = None
-        if hasattr(self, 'track3'):
-            self.track3.finish()
-            self.track3 = None
-        if self.rewardPanel:
-            self.rewardPanel.hide()
-        if self.playByPlayText:
-            self.playByPlayText.hide()
+        leaseToken = self._browserAudioLease
+        try:
+            if self.track:
+                self.track.finish()
+                self._deleteTrack()
+            if hasattr(self, 'track1'):
+                self.track1.finish()
+                self.track1 = None
+            if hasattr(self, 'track2'):
+                self.track2.finish()
+                self.track2 = None
+            if hasattr(self, 'track3'):
+                self.track3.finish()
+                self.track3 = None
+            if self.rewardPanel:
+                self.rewardPanel.hide()
+            if self.playByPlayText:
+                self.playByPlayText.hide()
+            self._deleteTutorialRewardTom()
+        finally:
+            self._releaseBrowserAudioLease('stop', leaseToken)
         return
+
+    def _buildBrowserToonAttack(
+            self, trackName, trackId, builder, *builderArgs):
+        """Build one gag track while exposing its synchronous client cost."""
+        startedAt = time.perf_counter()
+        attacks = self.__findToonAttack(trackId)
+        selectMs = int((time.perf_counter() - startedAt) * 1000.0)
+        if attacks or selectMs >= 20:
+            print('[BrowserPerformanceBattleBuild] %s select %s %s' % (
+                trackName, len(attacks), selectMs))
+
+        startedAt = time.perf_counter()
+        result = builder(attacks, *builderArgs)
+        constructMs = int((time.perf_counter() - startedAt) * 1000.0)
+        if attacks or constructMs >= 20:
+            print('[BrowserPerformanceBattleBuild] %s construct %s %s' % (
+                trackName, len(attacks), constructMs))
+        return result, len(attacks)
 
     def __doToonAttacks(self):
         if base.config.GetBool('want-toon-attack-anims', 1):
+            # Reactive tracks are intentionally absent from this Toon phase.
+            # They remain armed until the server has finalized each Cog's
+            # attack and target list, then play from __doSuitAttacks only.
             track = Sequence(name='toon-attacks')
             camTrack = Sequence(name='toon-attacks-cam')
-            ival, camIval = MovieFire.doFires(self.__findToonAttack(FIRE))
+            allStartedAt = time.perf_counter()
+            selectedAttackCount = 0
+            result, count = self._buildBrowserToonAttack(
+                'fire', FIRE, MovieFire.doFires)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieSOS.doSOSs(self.__findToonAttack(SOS))
+            result, count = self._buildBrowserToonAttack(
+                'sos', SOS, MovieSOS.doSOSs)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieNPCSOS.doNPCSOSs(self.__findToonAttack(NPCSOS))
+            result, count = self._buildBrowserToonAttack(
+                'npc_sos', NPCSOS, MovieNPCSOS.doNPCSOSs)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MoviePetSOS.doPetSOSs(self.__findToonAttack(PETSOS))
+            result, count = self._buildBrowserToonAttack(
+                'pet_sos', PETSOS, MoviePetSOS.doPetSOSs)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
             hasHealBonus = self.battle.getInteractivePropTrackBonus() == HEAL
-            ival, camIval = MovieHeal.doHeals(self.__findToonAttack(HEAL), hasHealBonus)
+            result, count = self._buildBrowserToonAttack(
+                'toon_up', HEAL, MovieHeal.doHeals, hasHealBonus)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieTrap.doTraps(self.__findToonAttack(TRAP))
+            result, count = self._buildBrowserToonAttack(
+                'trap', TRAP, MovieTrap.doTraps)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieLure.doLures(self.__findToonAttack(LURE))
+            result, count = self._buildBrowserToonAttack(
+                'lure', LURE, MovieLure.doLures)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieSound.doSounds(self.__findToonAttack(SOUND))
+            result, count = self._buildBrowserToonAttack(
+                'sound', SOUND, MovieSound.doSounds)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieThrow.doThrows(self.__findToonAttack(THROW))
+            result, count = self._buildBrowserToonAttack(
+                'throw', THROW, MovieThrow.doThrows)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieSquirt.doSquirts(self.__findToonAttack(SQUIRT))
+            result, count = self._buildBrowserToonAttack(
+                'squirt', SQUIRT, MovieSquirt.doSquirts)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
-            ival, camIval = MovieDrop.doDrops(self.__findToonAttack(DROP))
+            result, count = self._buildBrowserToonAttack(
+                'drop', DROP, MovieDrop.doDrops)
+            ival, camIval = result
+            selectedAttackCount += count
             if ival:
                 track.append(ival)
                 camTrack.append(camIval)
+            allMs = int((time.perf_counter() - allStartedAt) * 1000.0)
+            if selectedAttackCount or allMs >= 20:
+                print('[BrowserPerformanceBattleBuild] all total %s %s' % (
+                    selectedAttackCount, allMs))
             if len(track) == 0:
                 return (None, None)
             else:
@@ -507,6 +676,7 @@ class Movie(DirectObject.DirectObject):
         self.uberList = uberList
 
     def genAttackDicts(self, toons, suits, id0, tr0, le0, tg0, hp0, ac0, hpb0, kbb0, died0, revive0, id1, tr1, le1, tg1, hp1, ac1, hpb1, kbb1, died1, revive1, id2, tr2, le2, tg2, hp2, ac2, hpb2, kbb2, died2, revive2, id3, tr3, le3, tg3, hp3, ac3, hpb3, kbb3, died3, revive3, sid0, at0, stg0, dm0, sd0, sb0, st0, sid1, at1, stg1, dm1, sd1, sb1, st1, sid2, at2, stg2, dm2, sd2, sb2, st2, sid3, at3, stg3, dm3, sd3, sb3, st3):
+        startedAt = time.perf_counter()
         if self.track and self.track.isPlaying():
             self.notify.warning('genAttackDicts() - track is playing!')
         toonAttacks = ((id0,
@@ -579,6 +749,8 @@ class Movie(DirectObject.DirectObject):
           sb3,
           st3))
         self.__genSuitAttackDicts(toons, suits, suitAttacks)
+        print('[BrowserPerformanceBattleStage] attack_dicts %s' % int(
+            (time.perf_counter() - startedAt) * 1000.0))
 
     def __genToonAttackDicts(self, toons, suits, toonAttacks):
         for ta in toonAttacks:
@@ -597,6 +769,23 @@ class Movie(DirectObject.DirectObject):
                 adict['level'] = level
                 hps = ta[TOON_HP_COL]
                 kbbonuses = ta[TOON_KBBONUS_COL]
+                if isReactiveTrack(track):
+                    targetIndex = ta[TOON_TGT_COL]
+                    targetSuit = None
+                    if targetIndex >= 0 and targetIndex < len(suits):
+                        targetId = suits[targetIndex]
+                        if targetId != -1:
+                            targetSuit = self.battle.findSuit(targetId)
+                    adict['targetSuit'] = targetSuit
+                    adict['result'] = ta[TOON_ACCBONUS_COL]
+                    adict['preventedDamage'] = ta[TOON_HPBONUS_COL]
+                    adict['flusterTurns'] = (
+                        ta[TOON_HPBONUS_COL]
+                        if track == EMBARRASS_TRACK else 0)
+                    adict['battle'] = self.battle
+                    adict['playByPlayText'] = self.playByPlayText
+                    self.toonAttackDicts.append(adict)
+                    continue
                 if track == NPCSOS:
                     adict['npcId'] = ta[TOON_TGT_COL]
                     toonId = ta[TOON_TGT_COL]
@@ -821,6 +1010,7 @@ class Movie(DirectObject.DirectObject):
                 adict['battle'] = self.battle
                 adict['playByPlayText'] = self.playByPlayText
                 adict['taunt'] = sa[SUIT_TAUNT_COL]
+                adict['flusterTurns'] = sa[SUIT_BEFORE_TOONS_COL]
                 hps = sa[SUIT_HP_COL]
                 if adict['group'] == ATK_TGT_GROUP:
                     targets = []
@@ -884,10 +1074,36 @@ class Movie(DirectObject.DirectObject):
             camTrack = Sequence(name='suit-attacks-cam')
             isLocalToonSad = False
             for a in self.suitAttackDicts:
-                ival, camIval = MovieSuitAttacks.doSuitAttack(a)
-                if ival:
-                    track.append(ival)
-                    camTrack.append(camIval)
+                # Only reactions bound by the server to this finalized Cog
+                # attack are eligible to animate.  Untargeted Decoys carry no
+                # targetSuit and never enter the movie.
+                reactions = [reaction for reaction in self.toonAttackDicts
+                             if isReactiveTrack(reaction['track']) and
+                             reaction.get('targetSuit') == a['suit']]
+                successfulEmbarrass = any(
+                    reaction['track'] == EMBARRASS_TRACK and
+                    reaction['result'] == REACTIVE_RESULT_SUCCESS
+                    for reaction in reactions)
+                if (a.get('flusterTurns', 0) > 0 and
+                        not successfulEmbarrass):
+                    # Recreate/synchronize a status that carried over from the
+                    # prior round. A fresh success reveals itself inside its
+                    # own cushion movie instead of spoiling the roll early.
+                    track.append(Func(
+                        MovieReactive.showFlusteredStatus,
+                        a['suit'], a['flusterTurns']))
+                reactionIval, reactionCamIval, skipSuitAttack = MovieReactive.doReactions(a, reactions)
+                if reactionIval:
+                    track.append(reactionIval)
+                    camTrack.append(reactionCamIval)
+                if not skipSuitAttack:
+                    ival, camIval = MovieSuitAttacks.doSuitAttack(a)
+                    if ival:
+                        track.append(ival)
+                        camTrack.append(camIval)
+                if a.get('flusterTurns', 0) > 0:
+                    track.append(Func(
+                        MovieReactive.advanceFlusteredStatus, a['suit']))
                 targetField = a.get('target')
                 if targetField is None:
                     continue

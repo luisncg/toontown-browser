@@ -1,0 +1,76 @@
+diff --git a/panda/src/webgldisplay/webGLGraphicsWindow.cxx b/panda/src/webgldisplay/webGLGraphicsWindow.cxx
+index da094d1cb..2783b859f 100644
+--- a/panda/src/webgldisplay/webGLGraphicsWindow.cxx
++++ b/panda/src/webgldisplay/webGLGraphicsWindow.cxx
+@@ -635,35 +635,58 @@ on_mouse_event(int type, const EmscriptenMouseEvent *event, void *user_data) {
+   nassertr(device != nullptr, false);
+ 
+   const char *target = "#canvas";
++  int canvas_width, canvas_height;
++  double css_width, css_height;
++  emscripten_get_canvas_element_size(target, &canvas_width, &canvas_height);
++  emscripten_get_element_css_size(target, &css_width, &css_height);
++
++  // Emscripten reports targetX/Y and relative movement in CSS pixels.  A
++  // browser page may scale the canvas independently from its drawing buffer,
++  // especially after an application requests a different render resolution.
++  // Panda's MouseWatcher consumes drawing-buffer coordinates, so map every
++  // pointer event into that coordinate space before dispatching it.
++  double x_scale = css_width > 0.0 ? canvas_width / css_width : 1.0;
++  double y_scale = css_height > 0.0 ? canvas_height / css_height : 1.0;
++  int pointer_x = (int)(event->targetX * x_scale + 0.5);
++  int pointer_y = (int)(event->targetY * y_scale + 0.5);
++  EmscriptenPointerlockChangeEvent pointerlock;
++  emscripten_get_pointerlock_status(&pointerlock);
+ 
+   switch (type) {
+   case EMSCRIPTEN_EVENT_MOUSEDOWN:
+     // Don't register out-of-bounds mouse downs.
+-    if (event->targetX >= 0 && event->targetY >= 0) {
+-      int w, h;
+-      emscripten_get_canvas_element_size(target, &w, &h);
+-      if (event->targetX < w && event->targetY < h) {
+-        device->button_down(MouseButton::button(event->button));
+-        return true;
++    if (pointerlock.isActive ||
++        (pointer_x >= 0 && pointer_y >= 0 &&
++         pointer_x < canvas_width && pointer_y < canvas_height)) {
++      // targetX/Y remain absolute while Pointer Lock movement is relative.
++      // Replacing the accumulated relative position on click creates a large
++      // false delta on the following frame, snapping the camera backward.
++      if (!pointerlock.isActive) {
++        device->set_pointer_in_window(pointer_x, pointer_y);
+       }
++      device->button_down(MouseButton::button(event->button));
++      return true;
+     }
+     return false;
+ 
+   case EMSCRIPTEN_EVENT_MOUSEUP:
++    if (!pointerlock.isActive &&
++        pointer_x >= 0 && pointer_y >= 0 &&
++        pointer_x < canvas_width && pointer_y < canvas_height) {
++      device->set_pointer_in_window(pointer_x, pointer_y);
++    }
+     device->button_up(MouseButton::button(event->button));
+     return true;
+ 
+   case EMSCRIPTEN_EVENT_MOUSEMOVE:
+     {
+-      EmscriptenPointerlockChangeEvent ev;
+-      emscripten_get_pointerlock_status(&ev);
+-
+-      if (ev.isActive) {
++      if (pointerlock.isActive) {
+         PointerData md = device->get_pointer();
+-        device->set_pointer_in_window(md.get_x() + event->movementX,
+-                                      md.get_y() + event->movementY);
++        device->set_pointer_in_window(
++          md.get_x() + (int)(event->movementX * x_scale),
++          md.get_y() + (int)(event->movementY * y_scale));
+       } else {
+-        device->set_pointer_in_window(event->targetX, event->targetY);
++        device->set_pointer_in_window(pointer_x, pointer_y);
+       }
+     }
+     return true;

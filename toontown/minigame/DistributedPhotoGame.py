@@ -16,6 +16,7 @@ from . import PhotoGameGlobals
 from direct.gui.DirectGui import *
 from panda3d.core import *
 from toontown.toonbase import TTLocalizer
+from toontown.toonbase import KeybindSettings
 from toontown.golf import BuildGeometry
 from toontown.toon import Toon
 from toontown.toon import ToonDNA
@@ -1165,6 +1166,12 @@ class DistributedPhotoGame(DistributedMinigame, PhotoGameBase.PhotoGameBase):
         pass
 
     def __enableAimInterface(self):
+        movementEvents = KeybindSettings.getActiveMovementEvents()
+        self.FIRE_KEY = KeybindSettings.getActiveEvent('performAction')
+        self.UP_KEY = movementEvents['up']
+        self.DOWN_KEY = movementEvents['down']
+        self.LEFT_KEY = movementEvents['left']
+        self.RIGHT_KEY = movementEvents['right']
         self.accept(self.FIRE_KEY, self.__fireKeyPressed)
         self.accept(self.UP_KEY, self.__upKeyPressed)
         self.accept(self.DOWN_KEY, self.__downKeyPressed)

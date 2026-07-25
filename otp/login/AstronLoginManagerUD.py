@@ -1,6 +1,7 @@
 import json
 import time
 import os
+import tempfile
 from datetime import datetime
 
 from direct.directnotify import DirectNotifyGlobal
@@ -22,6 +23,8 @@ from otp.otpbase import OTPGlobals
 from toontown.makeatoon.NameGenerator import NameGenerator
 from toontown.toon.ToonDNA import ToonDNA
 from toontown.toonbase import TTLocalizer
+from otp.login.PasswordCredentialDB import PasswordCredentialDB
+from otp.login.LoginAttemptLimiter import LoginAttemptLimiter
 
 
 class AccountDB:
@@ -32,7 +35,7 @@ class AccountDB:
     def __init__(self, loginManager):
         self.loginManager = loginManager
 
-    def lookup(self, playToken, callback):
+    def lookup(self, playToken, password, callback, createOnly=False):
         raise NotImplementedError('lookup')  # Must be overridden by subclass.
 
     def storeAccountId(self, databaseId, accountId, callback):
@@ -46,6 +49,10 @@ class DeveloperAccountDB(AccountDB):
 
         # Setup the accountToId dictionary
         self.accountDbFilePath = config.GetString('accountdb-local-file', 'astron/databases/accounts.json')
+        credentialsPath = config.GetString(
+            'accountdb-credentials-file',
+            'astron/databases/credentials.json')
+        self.credentials = PasswordCredentialDB(credentialsPath)
         # Load the JSON file if it exists.
         if os.path.exists(self.accountDbFilePath):
             with open(self.accountDbFilePath, 'r') as file:
@@ -53,22 +60,84 @@ class DeveloperAccountDB(AccountDB):
         else:
             # If not, create a blank file.
             self.accountToId = {}
-            with open(self.accountDbFilePath, 'w') as file:
-                json.dump(self.accountToId, file)
+            self._saveAccountMap()
 
-    def lookup(self, playToken, callback):
+    def _saveAccountMap(self):
+        directory = os.path.dirname(os.path.abspath(self.accountDbFilePath))
+        os.makedirs(directory, mode=0o750, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix='.accounts-', suffix='.tmp', dir=directory, text=True)
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as file:
+                json.dump(self.accountToId, file, indent=2, sort_keys=True)
+                file.write('\n')
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, self.accountDbFilePath)
+            os.chmod(self.accountDbFilePath, 0o600)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
+
+    def _findAccountName(self, playToken):
+        folded = playToken.casefold()
+        for accountName in self.accountToId:
+            if accountName.casefold() == folded:
+                return accountName
+        return None
+
+    def lookup(self, playToken, password, callback, createOnly=False):
+        accountName = self._findAccountName(playToken)
+        if createOnly:
+            if accountName is not None or self.credentials.hasCredential(playToken):
+                callback({
+                    'success': False,
+                    'reason': 'That user name is already taken. Please try again.'})
+                return
+            try:
+                registered = self.credentials.registerPassword(
+                    playToken, password)
+            except ValueError:
+                callback({
+                    'success': False,
+                    'reason': 'The account name or password does not meet the requirements.'})
+                return
+            if not registered:
+                callback({
+                    'success': False,
+                    'reason': 'That user name is already taken. Please try again.'})
+                return
+            self.loginManager.notify.info(
+                'Registered password credentials for a new account.')
+            accountName = playToken
+        elif (
+            accountName is None
+            or not self.credentials.verifyPassword(accountName, password)
+        ):
+            self.loginManager.notify.warning(
+                'Rejected account authentication for connection %s' %
+                self.loginManager.air.getMsgSender())
+            callback({
+                'success': False,
+                'reason': 'The account name or password is incorrect.'})
+            return
+
         # Check if this play token exists in the accountsToId:
-        if playToken not in self.accountToId:
+        if accountName not in self.accountToId:
             # It is not, so we'll associate them with a brand new account object.
             # Get the default access level from config.
-            accessLevel = config.GetString('default-access-level', "SYSTEM_ADMIN")
+            accessLevel = config.GetString('default-access-level', "NO_ACCESS")
             if accessLevel not in OTPGlobals.AccessLevelName2Int:
-                self.loginManager.notify.warning(f'Access Level "{accessLevel}" isn\'t defined.  Reverting back to SYSTEM_ADMIN')
-                accessLevel = "SYSTEM_ADMIN"
+                self.loginManager.notify.warning(f'Access Level "{accessLevel}" isn\'t defined.  Reverting back to NO_ACCESS')
+                accessLevel = "NO_ACCESS"
 
             callback({'success': True,
                       'accountId': 0,
-                      'databaseId': playToken,
+                      'databaseId': accountName,
                       'accessLevel': accessLevel})
         else:
             def handleAccount(dclass, fields):
@@ -78,8 +147,8 @@ class DeveloperAccountDB(AccountDB):
                 else:
                     # We already have an account object, so we'll just return what we have.
                     result = {'success': True,
-                              'accountId': self.accountToId[playToken],
-                              'databaseId': playToken,
+                              'accountId': self.accountToId[accountName],
+                              'databaseId': accountName,
                               'accessLevel': fields.get('ACCESS_LEVEL', 'NO_ACCESS')}
 
                 callback(result)
@@ -88,15 +157,14 @@ class DeveloperAccountDB(AccountDB):
             # the ACCESS_LEVEL field anyways.
             # TODO: Add a timeout timer?
             self.loginManager.air.dbInterface.queryObject(self.loginManager.air.dbId,
-                                                          self.accountToId[playToken], handleAccount,
+                                                          self.accountToId[accountName], handleAccount,
                                                           self.loginManager.air.dclassesByName['AstronAccountUD'],
                                                           ('ACCESS_LEVEL',))
 
     def storeAccountId(self, databaseId, accountId, callback):
         if databaseId not in self.accountToId:
             self.accountToId[databaseId] = accountId
-            with open(self.accountDbFilePath, 'w') as file:
-                json.dump(self.accountToId, file, indent=2)
+            self._saveAccountMap()
             callback(True)
         else:
             self.loginManager.notify.warning(f"Attempted to store user {databaseId} with account {accountId} even though it already exists!")
@@ -141,9 +209,11 @@ class LoginOperation(GameOperation):
         self.accountId = 0
         self.account = None
 
-    def start(self, playToken):
+    def start(self, playToken, password, createOnly=False):
         self.playToken = playToken
-        self.loginManager.accountDb.lookup(playToken, self.__handleLookup)
+        self.loginManager.accountDb.lookup(
+            playToken, password, self.__handleLookup,
+            createOnly=createOnly)
 
     def __handleLookup(self, result):
         # This is a callback function that will be called by the lookup function
@@ -152,7 +222,12 @@ class LoginOperation(GameOperation):
         if not result.get('success'):
             # The play token was rejected!
             self.loginManager.air.writeServerEvent('play-token-rejected', self.sender, self.playToken)
-            self._handleCloseConnection(result.get('reason', 'The accounts database rejected your play token.'))
+            self.loginManager.sendLoginFailure(
+                self.sender,
+                result.get(
+                    'reason',
+                    'The account name or password is incorrect.'))
+            self._handleDone()
             return
 
         # Grab the databaseId, accessLevel, and the accountId from the result.
@@ -185,6 +260,7 @@ class LoginOperation(GameOperation):
 
     def __handleCreateAccount(self):
         self.account = {'ACCOUNT_AV_SET': [0] * 6,
+                        'HOUSE_ID_SET': [],
                         'ESTATE_ID': 0,
                         'ACCOUNT_AV_SET_DEL': [],
                         'CREATED': time.ctime(),
@@ -272,6 +348,9 @@ class LoginOperation(GameOperation):
         }
         responseBlob = json.dumps(responseData)
         self.loginManager.sendUpdateToChannel(self.sender, 'loginResponse', [responseBlob])
+        self.loginManager.senderLoginAttempts.reset(self.sender)
+        self.loginManager.accountLoginAttempts.reset(
+            self.playToken.casefold())
         self._handleDone()
 
     def getLastLoggedInStr(self):
@@ -845,6 +924,8 @@ class AstronLoginManagerUD(DistributedObjectGlobalUD):
         self.accountDb = None
         self.sender2loginOperation = {}
         self.account2operation = {}
+        self.senderLoginAttempts = LoginAttemptLimiter()
+        self.accountLoginAttempts = LoginAttemptLimiter()
 
     def announceGenerate(self):
         DistributedObjectGlobalUD.announceGenerate(self)
@@ -885,7 +966,15 @@ class AstronLoginManagerUD(DistributedObjectGlobalUD):
             datagram.addString(reason if reason else 'No reason specified.')
         self.air.send(datagram)
 
-    def runLoginOperation(self, playToken):
+    def sendLoginFailure(self, connectionId, reason):
+        responseBlob = json.dumps({
+            'returnCode': 12,
+            'respString': reason,
+        })
+        self.sendUpdateToChannel(
+            connectionId, 'loginResponse', [responseBlob])
+
+    def runLoginOperation(self, playToken, password, createOnly=False):
         # Runs a login operation on the sender. First, get the sender:
         sender = self.air.getMsgSender()
 
@@ -899,10 +988,20 @@ class AstronLoginManagerUD(DistributedObjectGlobalUD):
             self.closeConnection(sender, forOperations=True)
             return
 
+        accountKey = playToken.casefold()
+        senderAllowed = self.senderLoginAttempts.consume(sender)
+        accountAllowed = self.accountLoginAttempts.consume(accountKey)
+        if not senderAllowed or not accountAllowed:
+            self.sendLoginFailure(
+                sender,
+                'Too many login attempts. Please wait a minute and try again.')
+            return
+
         # Run the login operation:
         newLoginOperation = LoginOperation(self, sender)
         self.sender2loginOperation[sender] = newLoginOperation
-        newLoginOperation.start(playToken)
+        newLoginOperation.start(
+            playToken, password, createOnly=createOnly)
 
     def runGameOperation(self, operationType, *args):
         # Runs a game operation on the sender. First, get the sender:
@@ -922,9 +1021,14 @@ class AstronLoginManagerUD(DistributedObjectGlobalUD):
         self.account2operation[sender] = newOperation
         newOperation.start(*args)
 
-    def requestLogin(self, playToken):
+    def requestLogin(self, playToken, password):
         # Someone wants to log in to the game; run a LoginOperation:
-        self.runLoginOperation(playToken)
+        self.runLoginOperation(playToken, password)
+
+    def requestCreateAccount(self, playToken, password):
+        # Account creation is intentionally distinct from login: an existing
+        # username must be rejected even when the supplied password is valid.
+        self.runLoginOperation(playToken, password, createOnly=True)
 
     def requestAvatarList(self):
         # Someone wants their avatar list; run a GetAvatarsOperation:

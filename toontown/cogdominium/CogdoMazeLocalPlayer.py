@@ -6,6 +6,7 @@ from toontown.toonbase import TTLocalizer
 from toontown.minigame.OrthoDrive import OrthoDrive
 from toontown.minigame.OrthoWalk import OrthoWalk
 from toontown.toonbase import ToontownGlobals
+from toontown.toonbase import KeybindSettings
 from . import CogdoGameConsts
 from . import CogdoMazeGameGlobals as Globals
 from .CogdoMazePlayer import CogdoMazePlayer
@@ -44,7 +45,8 @@ class CogdoMazeLocalPlayer(CogdoMazePlayer):
          'squashed': False,
          'boss': False,
          'minion': False}
-        self.accept('control', self.controlKeyPressed)
+        self._performActionHotkey = KeybindSettings.getActiveEvent('performAction')
+        self.accept(self._performActionHotkey, self.controlKeyPressed)
 
     def destroy(self):
         self.toon.showName()
@@ -132,7 +134,7 @@ class CogdoMazeLocalPlayer(CogdoMazePlayer):
     def enterDone(self):
         CogdoMazePlayer.enterDone(self)
         self._guiMgr.hideQuestArrow()
-        self.ignore('control')
+        self.ignore(self._performActionHotkey)
         self._guiMgr.setMessage('')
         if self.exited == False:
             self.lostMemos()

@@ -149,7 +149,7 @@ def getAllFloorings(*indexList):
 
 
 def getFlooringRange(fromIndex, toIndex, *otherRanges):
-    list = []
+    items = []
     froms = [fromIndex]
     tos = [toIndex]
     i = 0
@@ -158,15 +158,15 @@ def getFlooringRange(fromIndex, toIndex, *otherRanges):
         tos.append(otherRanges[i + 1])
         i += 2
 
-    for patternIndex in list(FlooringTypes.keys()):
+    for patternIndex in FlooringTypes.keys():
         for fromIndex, toIndex in zip(froms, tos):
             if patternIndex >= fromIndex and patternIndex <= toIndex:
                 colors = FlooringTypes[patternIndex][FTColor]
                 if colors:
                     for n in range(len(colors)):
-                        list.append(CatalogFlooringItem(patternIndex, n))
+                        items.append(CatalogFlooringItem(patternIndex, n))
 
                 else:
-                    list.append(CatalogFlooringItem(patternIndex, 0))
+                    items.append(CatalogFlooringItem(patternIndex, 0))
 
-    return list
+    return items

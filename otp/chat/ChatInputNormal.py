@@ -49,6 +49,7 @@ class ChatInputNormal(DirectObject.DirectObject):
         else:
             self.chatFrame.setPos(self.normalPos)
             self.whisperLabel.hide()
+        self.chatEntry['suppressKeys'] = 1
         self.chatEntry['focus'] = 1
         self.chatFrame.show()
         if self.wantHistory:
@@ -58,6 +59,7 @@ class ChatInputNormal(DirectObject.DirectObject):
     def deactivate(self):
         self.chatEntry.set('')
         self.chatEntry['focus'] = 0
+        self.chatEntry['suppressKeys'] = 0
         self.chatFrame.hide()
         self.whisperLabel.hide()
         base.win.closeIme()

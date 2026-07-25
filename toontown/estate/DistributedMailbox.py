@@ -39,6 +39,9 @@ class DistributedMailbox(DistributedObject.DistributedObject):
         if self.houseId == base.localAvatar.houseId:
             self.accept(self.mailboxSphereEnterEvent, self.__handleEnterSphere)
         self.load()
+        DistributedMailbox.notify.info(
+            'Mailbox ready for house %s at estate plot %s' %
+            (self.houseId, self.housePosInd))
 
     def load(self):
         DistributedMailbox.notify.debug('load')
@@ -125,6 +128,9 @@ class DistributedMailbox(DistributedObject.DistributedObject):
 
     def __handleEnterSphere(self, collEntry):
         DistributedMailbox.notify.debug('Entering Mailbox Sphere....')
+        DistributedMailbox.notify.info(
+            'Local avatar entered mailbox collision for house %s' %
+            self.houseId)
         self.ignore(self.mailboxSphereEnterEvent)
         self.cr.playGame.getPlace().detectedMailboxCollision()
         self.accept('mailboxAsleep', self.__handleMailboxSleep)
@@ -163,6 +169,8 @@ class DistributedMailbox(DistributedObject.DistributedObject):
         isLocalToon = avId == base.localAvatar.doId
         if isLocalToon:
             DistributedMailbox.notify.debug('setMovie( mode=%d, avId=%d ) called on a local toon' % (mode, avId))
+            DistributedMailbox.notify.info(
+                'Local mailbox movie mode %s for avatar %s' % (mode, avId))
         else:
             DistributedMailbox.notify.debug('setMovie( mode=%d, avId=%d ) called on a non-local toon' % (mode, avId))
         if mode == MailboxGlobals.MAILBOX_MOVIE_CLEAR:

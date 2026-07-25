@@ -17,6 +17,14 @@ from toontown.toon import InventoryBase
 from toontown.toonbase import ToontownGlobals
 import random
 from toontown.toon import NPCToons
+from .ReactiveGagGlobals import (
+    DECOY_TRACK,
+    EMBARRASS_TRACK,
+    REACTIVE_RESULT_FAILURE,
+    REACTIVE_RESULT_SUCCESS,
+    isImplementedReactiveGag,
+    isReactiveTrack,
+)
 
 class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBase):
     notify = DirectNotifyGlobal.directNotify.newCategory('DistributedBattleBaseAI')
@@ -326,7 +334,12 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
                 if id != -1:
                     index = self.activeToons.index(id)
                 track = ta[TOON_TRACK_COL]
-                if (track == NO_ATTACK or attackAffectsGroup(track, ta[TOON_LVL_COL])) and track != NPCSOS and track != PETSOS:
+                if isReactiveTrack(track):
+                    if suitIds.count(ta[TOON_TGT_COL]) != 0:
+                        target = suitIds.index(ta[TOON_TGT_COL])
+                    else:
+                        target = -1
+                elif (track == NO_ATTACK or attackAffectsGroup(track, ta[TOON_LVL_COL])) and track != NPCSOS and track != PETSOS:
                     target = -1
                     if track == HEAL:
                         if ta[TOON_LVL_COL] == 1:
@@ -1019,13 +1032,39 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
         if toon == None:
             self.notify.warning('requestAttack() - no toon: %d' % toonId)
             return
+        if track != UN_ATTACK and self.responses.get(toonId, 0) > 0:
+            self.air.writeServerEvent('suspicious', toonId, 'requestAttack: attempted more than one action in a round')
+            self.notify.warning('requestAttack() - toon %d already chose an action' % toonId)
+            return
         validResponse = 1
         if toon.getGameAccess() != ToontownGlobals.AccessFull:
             if track in [HEAL, TRAP, LURE, SOUND, THROW, SQUIRT, DROP] and gagIsPaidOnly(track, level):
                 self.air.writeServerEvent('suspicious', toonId, 'requestAttack: non-paid player requesting attack with paid gag')
                 return
 
-        if track == SOS:
+        if isReactiveTrack(track):
+            if not self.validate(toonId, isImplementedReactiveGag(track, level),
+                                 'requestAttack: unavailable reactive gag track %s level %s' % (track, level)):
+                return
+            if not self.validate(toonId, toon.hasReactiveGag(track, level),
+                                 'requestAttack: no reactive gag inventory for track %s level %s' % (track, level)):
+                return
+            if track == DECOY_TRACK:
+                if not self.validate(toonId, av == toonId,
+                                     'requestAttack: Decoy must target the requesting Toon'):
+                    return
+                self.toonAttacks[toonId] = getToonAttack(toonId, track=track, level=level, target=toonId)
+            elif track == EMBARRASS_TRACK:
+                activeSuitIds = [suit.doId for suit in self.activeSuits]
+                if av == -1:
+                    self.toonAttacks[toonId] = getToonAttack(toonId, track=track, level=level, target=-1)
+                    validResponse = 0
+                elif not self.validate(toonId, av in activeSuitIds,
+                                       'requestAttack: Embarrass target is not an active Cog'):
+                    return
+                else:
+                    self.toonAttacks[toonId] = getToonAttack(toonId, track=track, level=level, target=av)
+        elif track == SOS:
             self.notify.debug('toon: %d calls for help' % toonId)
             self.air.writeServerEvent('friendSOS', toonId, '%s' % av)
             self.toonAttacks[toonId] = getToonAttack(toonId, track=SOS, target=av)
@@ -1185,6 +1224,7 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
                 self.addHelpfulToon(t)
 
         self.battleCalc.calculateRound()
+        self.__consumeTriggeredReactiveGags()
         for t in self.activeToons:
             self.sendEarnedExperience(t)
             toon = self.getToon(t)
@@ -1196,6 +1236,24 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
         self.d_setMovie()
         self.b_setState('PlayMovie')
         return Task.done
+
+    def __consumeTriggeredReactiveGags(self):
+        for toonId in self.activeToons:
+            attack = self.toonAttacks.get(toonId)
+            if not attack or not isReactiveTrack(attack[TOON_TRACK_COL]):
+                continue
+            if attack[TOON_ACCBONUS_COL] not in (
+                    REACTIVE_RESULT_SUCCESS, REACTIVE_RESULT_FAILURE):
+                continue
+            toon = self.getToon(toonId)
+            if toon is None:
+                continue
+            if not toon.useReactiveGag(
+                    attack[TOON_TRACK_COL], attack[TOON_LVL_COL]):
+                self.notify.warning(
+                    'Toon %d triggered unavailable reactive gag %s:%s' % (
+                        toonId, attack[TOON_TRACK_COL],
+                        attack[TOON_LVL_COL]))
 
     def sendEarnedExperience(self, toonId):
         toon = self.getToon(toonId)
@@ -1349,6 +1407,11 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
                         pass
                     elif track == FIRE:
                         pass
+                    elif isReactiveTrack(track):
+                        # Reactive stock is persisted separately and consumed
+                        # exactly once after resolution.  Never index the
+                        # classic seven-track inventory with IDs 101/102.
+                        pass
                     elif track != SOS:
                         toon = self.getToon(toonId)
                         if toon != None:
@@ -1376,6 +1439,9 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
                                     self.notify.debug('pet heal: toon: %d healed for hp: %d' % (toon.doId, hp))
                                 else:
                                     self.notify.warning('Invalid targetIndex %s in hps %s.' % (i, hps))
+
+                    elif isReactiveTrack(track):
+                        pass
 
                     elif track == NPC_RESTOCK_GAGS:
                         for at in self.activeToons:

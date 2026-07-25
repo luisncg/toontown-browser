@@ -18,6 +18,7 @@ from otp.avatar.Avatar import teleportNotify
 from toontown.toonbase.ToonBaseGlobal import *
 from toontown.toonbase.ToontownGlobals import *
 from toontown.launcher.DownloadForceAcknowledge import *
+from toontown.launcher.BrowserStreamingPolicy import startBackgroundDownloadsForToon
 from toontown.distributed import DelayDelete
 from toontown.friends import FriendHandle
 from toontown.friends import FriendsListPanel
@@ -37,7 +38,9 @@ from .ToontownMsgTypes import *
 from . import HoodMgr
 from . import PlayGame
 from toontown.toontowngui import ToontownLoadingBlocker
-from toontown.hood import StreetSign
+from toontown.hood import StreetSign, ZoneUtil
+import sys
+import time
 
 class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
     SupportTutorial = 1
@@ -61,7 +64,7 @@ class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
             nameTagFontIndex += 1
 
         self.toons = {}
-        if self.http.getVerifySsl() != HTTPClient.VSNoVerify:
+        if sys.platform != 'emscripten' and self.http.getVerifySsl() != HTTPClient.VSNoVerify:
             self.http.setVerifySsl(HTTPClient.VSNoDateCheck)
         #prepareAvatar(self.http)
         self.__forbidCheesyEffects = 0
@@ -70,6 +73,7 @@ class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
         self.trophyManager = None
         self.bankManager = None
         self.catalogManager = None
+        self.estateMgr = None
         self.welcomeValleyManager = None
         self.newsManager = None
         self.wantStreetSign = ConfigVariableBool('want-street-sign', 0).value
@@ -220,7 +224,25 @@ class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
             self.loadingBlocker = ToontownLoadingBlocker.ToontownLoadingBlocker(avList)
         return
 
-    def __handleAvatarChooserDone(self, avList, doneStatus):
+    def __resumeBrowserAvatarChoice(self):
+        avList, doneStatus = self._browserPendingAvatarChoice
+        del self._browserPendingAvatarChoice
+        self.ignore('browser-phase-failed')
+        self.__handleAvatarChooserDone(
+            avList, doneStatus, browserAssetsReady=True)
+
+    def __handleBrowserPlaygroundPhaseFailed(self, phase):
+        self.ignore('browser-playground-phases-ready')
+        if hasattr(self, '_browserPendingAvatarChoice'):
+            del self._browserPendingAvatarChoice
+        if getattr(self, 'loadingBlocker', None):
+            self.loadingBlocker.destroy()
+            self.loadingBlocker = None
+        self.notify.warning(
+            'Could not load browser playground phase %s.' % phase)
+
+    def __handleAvatarChooserDone(
+            self, avList, doneStatus, browserAssetsReady=False):
         done = doneStatus['mode']
         if done == 'exit':
             if not launcher.isDummy():
@@ -247,6 +269,28 @@ class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
                     self.notify.info('freeTimeLeft: %s' % self.freeTimeLeft())
                     self.notify.info('allowSecretChat: %s' % self.allowSecretChat())
                 self.notify.info('================')
+
+        if (
+            done == 'chose'
+            and not browserAssetsReady
+            and hasattr(launcher, 'isBrowserStreaming')
+            and launcher.isBrowserStreaming()
+            and not (
+                launcher.getPhaseComplete(3.5)
+                and launcher.getPhaseComplete(4)
+            )
+        ):
+            self._browserPendingAvatarChoice = (avList, doneStatus)
+            self.acceptOnce(
+                'browser-playground-phases-ready',
+                self.__resumeBrowserAvatarChoice)
+            self.acceptOnce(
+                'browser-phase-failed',
+                self.__handleBrowserPlaygroundPhaseFailed)
+            launcher.prepareForPlayground()
+            self.loadingBlocker = (
+                ToontownLoadingBlocker.ToontownLoadingBlocker(avList))
+            return
 
         if done == 'chose':
             self.avChoice.exit()
@@ -382,11 +426,24 @@ class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
             return
     else:
         def handleAvatarResponseMsg(self, avatarId, di):
+            avatarSetupStartedAt = time.perf_counter()
+            avatarSetupLastAt = avatarSetupStartedAt
+
+            def recordAvatarSetup(stage):
+                nonlocal avatarSetupLastAt
+                now = time.perf_counter()
+                elapsedMs = int((now - avatarSetupLastAt) * 1000.0)
+                print('[BrowserPerformanceAvatar] %s %s' % (
+                    stage, elapsedMs))
+                avatarSetupLastAt = now
+
             self.cleanupWaitingForDatabase()
             dclass = self.dclassesByName['DistributedToon']
             NametagGlobals.setMasterArrowsOn(0)
             loader.beginBulkLoad('localAvatarPlayGame', OTPLocalizer.CREnteringToontown, 400, 1, TTLocalizer.TIP_GENERAL)
+            recordAvatarSetup('loading')
             localAvatar = LocalToon.LocalToon(self)
+            recordAvatarSetup('construct')
             localAvatar.dclass = dclass
             base.localAvatar = localAvatar
             __builtins__['localAvatar'] = base.localAvatar
@@ -396,15 +453,24 @@ class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
             parentId = None
             zoneId = None
             localAvatar.setLocation(parentId, zoneId)
+            recordAvatarSetup('identity')
             localAvatar.generateInit()
             localAvatar.generate()
+            recordAvatarSetup('generate')
             dclass.receiveUpdateBroadcastRequiredOwner(localAvatar, di)
+            recordAvatarSetup('required_fields')
             localAvatar.announceGenerate()
             localAvatar.postGenerateMessage()
+            recordAvatarSetup('announce')
             self.doId2do[avatarId] = localAvatar
             localAvatar.initInterface()
+            recordAvatarSetup('interface')
             self.sendGetFriendsListRequest()
             self.loginFSM.request('playingGame')
+            recordAvatarSetup('playing')
+            totalMs = int(
+                (time.perf_counter() - avatarSetupStartedAt) * 1000.0)
+            print('[BrowserPerformanceAvatar] total %s' % totalMs)
 
     def getAvatarDetails(self, avatar, func, *args):
         pad = ScratchPad()
@@ -454,17 +520,38 @@ class ToontownClientRepository(OTPClientRepository.OTPClientRepository):
             pad.func(*(gotData, pad.avatar) + pad.args)
         pad.delayDelete.destroy()
 
-    def enterPlayingGame(self, *args, **kArgs):
+    def __finishEnterPlayingGame(self, args, kArgs):
         OTPClientRepository.OTPClientRepository.enterPlayingGame(self, *args, **kArgs)
         self.gameFSM.request('waitOnEnterResponses', [None,
          base.localAvatar.defaultZone,
          base.localAvatar.defaultZone,
          -1])
         self._userLoggingOut = False
+        # A returning Toon can cache optional world content immediately. New
+        # Toons wait until the tutorial is acknowledged so package mounts
+        # cannot interrupt their first interactions.
+        startBackgroundDownloadsForToon(launcher, base.localAvatar)
         
         if self.wantStreetSign and not self.streetSign:
             self.streetSign = StreetSign.StreetSign()
         return
+
+    def enterPlayingGame(self, *args, **kArgs):
+        if (
+            hasattr(launcher, 'isBrowserStreaming')
+            and launcher.isBrowserStreaming()
+        ):
+            hoodId = ZoneUtil.getCanonicalHoodId(
+                base.localAvatar.defaultZone)
+            phase = phaseMap.get(hoodId, 4)
+            if not launcher.getPhaseComplete(phase):
+                self.acceptOnce(
+                    'phaseComplete-' + repr(phase),
+                    self.__finishEnterPlayingGame,
+                    [args, kArgs])
+                launcher.requestPhase(phase)
+                return
+        self.__finishEnterPlayingGame(args, kArgs)
 
     def exitPlayingGame(self):
         ivalMgr.interrupt()

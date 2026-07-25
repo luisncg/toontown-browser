@@ -99,5 +99,26 @@ class ToontownLoader(Loader.Loader):
 
     def loadDNAFile(self, dnaStore, dnaFile):
         ret = loadDNAFile(dnaStore, dnaFile, CSDefault, 0)
+        if (
+            ret
+            and ConfigVariableBool(
+                'browser-fix-dna-sign-order', False).value
+        ):
+            root = NodePath(ret)
+            signs = root.findAllMatches('**/sign')
+            for signIndex in range(signs.getNumPaths()):
+                sign = signs.getPath(signIndex)
+                baselines = sign.findAllMatches('**/baseline')
+                if baselines.getNumPaths() == 0:
+                    continue
+                # The browser maps M_dual cards to alpha blending because
+                # WebGL has no fixed-function alpha test.  Keep each card and
+                # its DNA-generated lettering together in a deterministic
+                # fixed bin so camera-distance sorting cannot draw the white
+                # sign face over its words.
+                sign.setBin('browser-dna-sign', 0, 100)
+                for baselineIndex in range(baselines.getNumPaths()):
+                    baselines.getPath(baselineIndex).setBin(
+                        'browser-dna-sign', 1, 101)
         self.tick()
         return ret

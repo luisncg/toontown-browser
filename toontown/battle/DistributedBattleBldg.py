@@ -40,7 +40,29 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
             self.battleMusic = base.loader.loadMusic('phase_7/audio/bgm/encntr_suit_winning_indoor.ogg')
         else:
             self.battleMusic = base.loader.loadMusic('phase_7/audio/bgm/encntr_general_bg_indoor.ogg')
-        base.playMusic(self.battleMusic, looping=1, volume=0.9)
+        # A Mega interior contains a second battle object for the other Toon
+        # squad.  Only the battle containing this client owns music/camera/UI.
+        if self.hasLocalToon():
+            base.playMusic(self.battleMusic, looping=1, volume=0.9)
+
+    def _isSpectatorBattle(self):
+        return bool(self.toons) and not self.hasLocalToon()
+
+    def _plantSpectatorMembers(self):
+        for suit in self.suits:
+            if suit is None:
+                continue
+            destPos, destHpr = self.getActorPosHpr(suit, self.suits)
+            suit.setPos(self, destPos)
+            suit.setHpr(self, destHpr)
+            suit.loop('neutral')
+        for toon in self.toons:
+            if toon is None:
+                continue
+            destPos, destHpr = self.getActorPosHpr(toon, self.toons)
+            toon.setPos(self, destPos)
+            toon.setHpr(self, destHpr)
+            toon.loop('neutral')
 
     def getBossBattleTaunt(self):
         return TTLocalizer.BattleBldgBossTaunt
@@ -140,6 +162,10 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
         return
 
     def enterFaceOff(self, ts):
+        if self._isSpectatorBattle():
+            self.delayDeleteMembers()
+            self._plantSpectatorMembers()
+            return None
         if len(self.toons) > 0 and base.localAvatar == self.toons[0]:
             Emote.globalEmote.disableAll(self.toons[0], 'dbattlebldg, enterFaceOff')
         self.delayDeleteMembers()
@@ -152,6 +178,9 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
 
     def exitFaceOff(self):
         self.notify.debug('exitFaceOff()')
+        if self._isSpectatorBattle():
+            self._removeMembersKeep()
+            return None
         if len(self.toons) > 0 and base.localAvatar == self.toons[0]:
             Emote.globalEmote.releaseAll(self.toons[0], 'dbattlebldg exitFaceOff')
         self.clearInterval(self.faceOffName)
@@ -159,6 +188,20 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
         camera.wrtReparentTo(self)
         base.camLens.setFov(self.camFov)
         return None
+
+    def enterPlayMovie(self, ts):
+        if self._isSpectatorBattle():
+            self.delayDeleteMembers()
+            return None
+        return DistributedBattleBase.DistributedBattleBase.enterPlayMovie(
+            self, ts)
+
+    def exitPlayMovie(self):
+        if self._isSpectatorBattle():
+            self.movie.reset(finish=1)
+            self._removeMembersKeep()
+            return None
+        return DistributedBattleBase.DistributedBattleBase.exitPlayMovie(self)
 
     def __playReward(self, ts, callback):
         toonTracks = Parallel()
@@ -174,6 +217,9 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
 
     def enterReward(self, ts):
         self.notify.debug('enterReward()')
+        if self._isSpectatorBattle():
+            self.delayDeleteMembers()
+            return None
         self.delayDeleteMembers()
         self.__playReward(ts, self.__handleFloorRewardDone)
         return None
@@ -183,6 +229,9 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
 
     def exitReward(self):
         self.notify.debug('exitReward()')
+        if self._isSpectatorBattle():
+            self._removeMembersKeep()
+            return None
         self.clearInterval(self.uniqueName('floorReward'))
         self._removeMembersKeep()
         NametagGlobals.setMasterArrowsOn(1)
@@ -192,6 +241,9 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
         return None
 
     def enterBuildingReward(self, ts):
+        if self._isSpectatorBattle():
+            self.delayDeleteMembers()
+            return None
         self.delayDeleteMembers()
         if self.hasLocalToon():
             NametagGlobals.setMasterArrowsOn(0)
@@ -205,6 +257,10 @@ class DistributedBattleBldg(DistributedBattleBase.DistributedBattleBase):
         self.fsm.request('Resume')
 
     def exitBuildingReward(self):
+        if self._isSpectatorBattle():
+            self.movie.resetReward(finish=1)
+            self._removeMembersKeep()
+            return None
         self.movie.resetReward(finish=1)
         self._removeMembersKeep()
         NametagGlobals.setMasterArrowsOn(1)

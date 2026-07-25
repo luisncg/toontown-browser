@@ -1,4 +1,6 @@
 from panda3d.core import *
+from panda3d.otp import Nametag, NametagGroup
+from panda3d.toontown import DNADoor
 from toontown.toonbase.ToonBaseGlobal import *
 from direct.gui.DirectGui import *
 from panda3d.core import *
@@ -258,6 +260,10 @@ class DistributedHouse(DistributedObject.DistributedObject):
         self.notify.debug('setHousePos')
         self.housePosInd = index
         self.__setHouseColor()
+
+    def setGardenPos(self, index):
+        self.notify.debug('setGardenPos')
+        self.gardenPosInd = index
 
     def setHouseType(self, index):
         self.notify.debug('setHouseType')

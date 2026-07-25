@@ -19,6 +19,11 @@ from toontown.toonbase import ToontownGlobals
 from toontown.toonbase import TTLocalizer
 import time
 
+try:
+    import browser_storage
+except ImportError:
+    browser_storage = None
+
 class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
     notify = DirectNotifyGlobal.directNotify.newCategory('DistributedPondBingoManager')
     cardTypeDict = {BingoGlobals.NORMAL_CARD: NormalBingo.NormalBingo,
@@ -39,6 +44,7 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
         self.initGameState = None
         self.lastCatch = None
         self.typeId = BingoGlobals.NORMAL_CARD
+        self.navigationDiagnostics = False
         return
 
     def generate(self):
@@ -46,12 +52,49 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
         self.card = BingoCardGui.BingoCardGui()
         self.card.reparentTo(aspect2d, 1)
         self.card.hideNextGameTimer()
-        self.notify.debug('generate: DistributedPondBingoManager')
+        self.notify.info(
+            'Fish Bingo manager ready for pond %s' % self.doId)
+        if getattr(base, 'localAvatar', None) is not None:
+            pos = base.localAvatar.getPos(render)
+            hpr = base.localAvatar.getHpr(render)
+            self.notify.info(
+                'Fish Bingo local position %.2f %.2f %.2f heading %.2f' %
+                (pos[0], pos[1], pos[2], hpr[0]))
+        taskMgr.doMethodLater(
+            4.0, self.__logSettledLocalPosition,
+            self.uniqueName('fish-bingo-position'))
+        if browser_storage is not None:
+            self.navigationDiagnostics = (
+                browser_storage.get_item(
+                    'open-toontown.fish-bingo-navigation') == '1')
+        if self.navigationDiagnostics:
+            taskMgr.doMethodLater(
+                0.5, self.__logNavigationPosition,
+                self.uniqueName('fish-bingo-navigation'))
+
+    def __logSettledLocalPosition(self, task):
+        if getattr(base, 'localAvatar', None) is not None:
+            pos = base.localAvatar.getPos(render)
+            hpr = base.localAvatar.getHpr(render)
+            self.notify.info(
+                'Fish Bingo settled position %.2f %.2f %.2f heading %.2f' %
+                (pos[0], pos[1], pos[2], hpr[0]))
+        return Task.done
+
+    def __logNavigationPosition(self, task):
+        if getattr(base, 'localAvatar', None) is not None:
+            pos = base.localAvatar.getPos(render)
+            hpr = base.localAvatar.getHpr(render)
+            self.notify.info(
+                'Fish Bingo navigation position %.2f %.2f %.2f heading %.2f' %
+                (pos[0], pos[1], pos[2], hpr[0]))
+        return Task.again
 
     def delete(self):
-        del self.pond.pondBingoMgr
-        self.pond.pondBingoMgr = None
-        del self.pond
+        taskMgr.remove(self.uniqueName('fish-bingo-position'))
+        taskMgr.remove(self.uniqueName('fish-bingo-navigation'))
+        if self.pond is not None:
+            self.pond.removePondBingoManager()
         self.pond = None
         FSM.FSM.cleanup(self)
         self.card.destroy()
@@ -75,6 +118,8 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
         self.tileSeed = tileSeed
         self.jackpot = BingoGlobals.getJackpot(typeId)
         self.initGameState = gameState
+        self.notify.info(
+            'Fish Bingo card %s ready (type %s)' % (cardId, typeId))
 
     def checkForUpdate(self, cellId):
         if self.lastCatch is not None:
@@ -121,7 +166,7 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
             self.card.hide()
 
     def showCard(self):
-        if (self.state != 'Off' or self.state != 'CloseEvent') and self.card.getGame():
+        if self.state not in ('Off', 'CloseEvent') and self.card.getGame():
             self.card.loadCard()
             self.card.show()
         elif self.state == 'GameOver':
@@ -143,7 +188,14 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
         success = self.card.checkForBingo()
         if success:
             self.d_bingoCall()
-            self.request('Reward')
+
+    @staticmethod
+    def _timestampValue(timeStamp):
+        while isinstance(timeStamp, (list, tuple)):
+            if not timeStamp:
+                return 0
+            timeStamp = timeStamp[0]
+        return timeStamp
 
     def enableBingo(self):
         self.card.setBingo(DGG.NORMAL, self.checkForBingo)
@@ -153,7 +205,7 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
         self.pond.setPondBingoManager(self)
 
     def setState(self, state, timeStamp):
-        self.notify.debug('State change: %s -> %s' % (self.state, state))
+        self.notify.info('Fish Bingo state: %s -> %s' % (self.state, state))
         self.request(state, timeStamp)
 
     def setLastCatch(self, catch):
@@ -170,11 +222,11 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
     def setJackpot(self, jackpot):
         self.jackpot = jackpot
 
-    def enterOff(self):
+    def enterOff(self, *args):
         self.notify.debug('enterOff: Enter Off State')
         del self.spot
         self.spot = None
-        if self.card.getGame:
+        if self.card.getGame():
             self.card.removeGame()
         self.card.hide()
         self.card.stopNextGameTimer()
@@ -219,7 +271,8 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
 
     def enterWaitCountdown(self, timeStamp):
         self.notify.debug('enterWaitCountdown: Enter WaitCountdown State')
-        time = BingoGlobals.TIMEOUT_SESSION - globalClockDelta.localElapsedTime(timeStamp[0])
+        timeStamp = self._timestampValue(timeStamp)
+        time = BingoGlobals.TIMEOUT_SESSION - globalClockDelta.localElapsedTime(timeStamp)
         self.card.startNextGameCountdown(time)
         if self.hasEntered:
             self.card.showNextGameTimer(TTLocalizer.FishBingoNextGame)
@@ -242,7 +295,8 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
         self.notify.debug('enterPlaying: Enter Playing State')
         self.lastCatch = None
         session = BingoGlobals.getGameTime(self.typeId)
-        time = session - globalClockDelta.localElapsedTime(timeStamp[0])
+        timeStamp = self._timestampValue(timeStamp)
+        time = session - globalClockDelta.localElapsedTime(timeStamp)
         self.card.startGameCountdown(time)
         self.card.enableCard(self.checkForUpdate)
         return
@@ -313,8 +367,9 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
         self.notify.debug('enterIntermission: Enter Intermission State')
         if self.hasEntered:
             self.card.showNextGameTimer(TTLocalizer.FishBingoIntermission)
-        self.notify.debug('enterIntermission: timestamp %s' % timeStamp[0])
-        elapsedTime = globalClockDelta.localElapsedTime(timeStamp[0])
+        timeStamp = self._timestampValue(timeStamp)
+        self.notify.debug('enterIntermission: timestamp %s' % timeStamp)
+        elapsedTime = globalClockDelta.localElapsedTime(timeStamp)
         self.notify.debug('enterIntermission: elapsedTime %s' % elapsedTime)
         waitTime = BingoGlobals.HOUR_BREAK_SESSION - elapsedTime
         self.notify.debug('enterIntermission: waitTime %s' % waitTime)

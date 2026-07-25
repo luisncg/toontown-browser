@@ -28,6 +28,7 @@ from toontown.fishing import FishTank
 from toontown.suit import SuitDNA
 from toontown.coghq import CogDisguiseGlobals
 from toontown.toonbase import TTLocalizer
+from toontown.launcher.BrowserStreamingPolicy import startBackgroundDownloadsForToon
 from . import Experience
 from . import InventoryNew
 from toontown.speedchat import TTSCDecoders
@@ -47,6 +48,11 @@ from toontown.parties.PartyReplyInfo import PartyReplyInfoBase
 from toontown.parties.SimpleMailBase import SimpleMailBase
 from toontown.parties import PartyGlobals
 from toontown.friends import FriendHandle
+from toontown.battle.ReactiveGagGlobals import (
+    MAX_REACTIVE_GAG_COUNT,
+    clampReactiveGagCount,
+    getReactiveTrackIndex,
+)
 import time
 import operator
 from direct.interval.IntervalGlobal import Sequence, Wait, Func, Parallel, SoundInterval
@@ -88,6 +94,8 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
         self.track = None
         self.effect = None
         self.maxCarry = 0
+        self.reactiveGagCounts = [MAX_REACTIVE_GAG_COUNT,
+                                  MAX_REACTIVE_GAG_COUNT]
         self.disguisePageFlag = 0
         self.sosPageFlag = 0
         self.disguisePage = None
@@ -319,6 +327,29 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
         if not self.inventory:
             self.inventory = InventoryNew.InventoryNew(self, inventoryNetString)
         self.inventory.updateInvString(inventoryNetString)
+
+    def setReactiveGagCounts(self, decoyCount, embarrassCount):
+        self.reactiveGagCounts = [
+            clampReactiveGagCount(decoyCount),
+            clampReactiveGagCount(embarrassCount),
+        ]
+        if self.inventory and hasattr(
+                self.inventory, 'updateReactiveGagControls'):
+            self.inventory.updateReactiveGagControls()
+        messenger.send('reactive-gag-counts-updated', [
+            tuple(self.reactiveGagCounts)])
+
+    def getReactiveGagCounts(self):
+        return tuple(self.reactiveGagCounts)
+
+    def getReactiveGagCount(self, track):
+        index = getReactiveTrackIndex(track)
+        if index < 0:
+            return 0
+        return self.reactiveGagCounts[index]
+
+    def d_requestReactiveGagRefill(self, track):
+        self.sendUpdate('requestReactiveGagRefill', [track])
 
     def setLastHood(self, lastHood):
         self.lastHood = lastHood
@@ -676,8 +707,9 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
 
     def setMaxHp(self, hitPoints):
         DistributedPlayer.DistributedPlayer.setMaxHp(self, hitPoints)
-        if self.inventory:
-            self.inventory.updateGUI()
+        # Max Laff does not affect any inventory value.  Rebuilding every gag
+        # button here made the first Laff reward do a large, synchronous GUI
+        # refresh in the middle of an NPC movie for no visible benefit.
 
     def died(self):
         messenger.send(self.uniqueName('died'))
@@ -710,7 +742,13 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
         DistributedSmoothNode.DistributedSmoothNode.wrtReparentTo(self, parent)
 
     def setTutorialAck(self, tutorialAck):
+        wasAcknowledged = getattr(self, 'tutorialAck', 0)
         self.tutorialAck = tutorialAck
+        if (tutorialAck and not wasAcknowledged
+                and self is getattr(base, 'localAvatar', None)):
+            print('[BrowserPerformanceState] tutorial_complete')
+            browserLauncher = getattr(base, 'launcher', None)
+            startBackgroundDownloadsForToon(browserLauncher, self)
 
     def setEarnedExperience(self, earnedExp):
         self.earnedExperience = earnedExp
@@ -1264,6 +1302,12 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
         DistributedSmoothNode.DistributedSmoothNode.d_setParent(self, parentToken)
 
     def setEmoteAccess(self, bits):
+        bits = list(bits)
+        expectedLength = len(OTPLocalizer.EmoteList)
+        if len(bits) < expectedLength:
+            bits.extend([0] * (expectedLength - len(bits)))
+        if expectedLength > 25:
+            bits[25] = 1
         self.emoteAccess = bits
         if self == base.localAvatar:
             messenger.send('emotesChanged')

@@ -18,6 +18,7 @@ from . import CannonGlobals
 from direct.gui.DirectGui import *
 from panda3d.core import *
 from toontown.toonbase import TTLocalizer
+from toontown.toonbase import KeybindSettings
 from direct.distributed import DistributedObject
 from toontown.effects import Wake
 from direct.controls.ControlManager import CollisionHandlerRayStart
@@ -534,6 +535,7 @@ class DistributedCannon(DistributedObject.DistributedObject):
 
     def __enableAimInterface(self):
         self.aimPad.show()
+        self.FIRE_KEY = KeybindSettings.getActiveEvent('performAction')
         self.accept(self.FIRE_KEY, self.__fireKeyPressed)
         self.accept(self.UP_KEY, self.__upKeyPressed)
         self.accept(self.DOWN_KEY, self.__downKeyPressed)

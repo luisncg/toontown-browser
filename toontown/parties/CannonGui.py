@@ -2,6 +2,7 @@ from direct.showbase.DirectObject import DirectObject
 from direct.gui.DirectGui import DirectFrame, DirectButton
 import direct.gui.DirectGuiGlobals as DGG
 from toontown.parties import PartyUtils
+from toontown.toonbase import KeybindSettings
 
 class CannonGui(DirectObject):
     notify = directNotify.newCategory('CannonGui')
@@ -124,6 +125,7 @@ class CannonGui(DirectObject):
         self.ignore(self.RIGHT_KEY + '-up')
 
     def enableFireKey(self):
+        self.FIRE_KEY = KeybindSettings.getActiveEvent('performAction')
         self.accept(self.FIRE_KEY, self.__fireKeyPressed)
 
     def disableFireKey(self):

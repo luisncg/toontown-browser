@@ -9,6 +9,7 @@ from direct.task import Task
 from toontown.toonbase import TTLocalizer
 from toontown.toonbase import ToontownGlobals
 from toontown.toonbase import ToontownTimer
+from toontown.toonbase import KeybindSettings
 from toontown.minigame import CogThiefGameToonSD
 from toontown.minigame.OrthoDrive import OrthoDrive
 from toontown.minigame.OrthoWalk import OrthoWalk
@@ -270,12 +271,13 @@ class DistributedCogThiefGame(DistributedMinigame):
         self.notify.debug('enterPlay')
         self.startGameWalk()
         self.spawnUpdateSuitsTask()
-        self.accept('control', self.controlKeyPressed)
+        self._performActionHotkey = KeybindSettings.getActiveEvent('performAction')
+        self.accept(self._performActionHotkey, self.controlKeyPressed)
         self.pieHandler = CollisionHandlerEvent()
         self.pieHandler.setInPattern('pieHit-%fn')
 
     def exitPlay(self):
-        self.ignore('control')
+        self.ignore(self._performActionHotkey)
         if self.resultIval and self.resultIval.isPlaying():
             self.resultIval.finish()
             self.resultIval = None

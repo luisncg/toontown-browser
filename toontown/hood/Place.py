@@ -18,6 +18,7 @@ from toontown.hood import ZoneUtil
 from toontown.hood.QuietZoneState import QuietZoneState
 from toontown.hood.TrialerForceAcknowledge import TrialerForceAcknowledge
 from toontown.launcher.DownloadForceAcknowledge import DownloadForceAcknowledge
+from toontown.launcher.BrowserStreamingPolicy import startBackgroundDownloadsForToon
 from toontown.safezone.PublicWalk import PublicWalk
 from toontown.toon.Toon import teleportDebug
 from toontown.toonbase import ToontownGlobals
@@ -231,6 +232,9 @@ class Place(StateData, FriendsListManager):
         base.localAvatar.questMap.acceptOnscreenHooks()
         self.walkStateData.fsm.request('walking')
         self.enablePeriodTimer()
+        browserLauncher = getattr(base, 'launcher', None)
+        startBackgroundDownloadsForToon(
+            browserLauncher, base.localAvatar)
 
     def exitWalk(self):
         self.exitFLM()
@@ -658,11 +662,18 @@ class Place(StateData, FriendsListManager):
     def getEstateZoneAndGoHome(self, requestStatus):
         self.doneStatus = requestStatus
         avId = requestStatus['avId']
+        estateMgr = getattr(base.cr, 'estateMgr', None)
+        if estateMgr is None or estateMgr.isDisabled():
+            self.notify.warning('EstateManager is unavailable; returning to the playground.')
+            self.doneStatus['estateUnavailable'] = 1
+            self.goHomeFailed(None)
+            return
+
         self.acceptOnce('setLocalEstateZone', self.goHome)
         if avId > 0:
-            base.cr.estateMgr.getLocalEstateZone(avId)
+            estateMgr.getLocalEstateZone(avId)
         else:
-            base.cr.estateMgr.getLocalEstateZone(base.localAvatar.getDoId())
+            estateMgr.getLocalEstateZone(base.localAvatar.getDoId())
 
         if HouseGlobals.WANT_TELEPORT_TIMEOUT:
             taskMgr.doMethodLater(HouseGlobals.TELEPORT_TIMEOUT, self.goHomeFailed, 'goHomeFailed')
@@ -705,7 +716,7 @@ class Place(StateData, FriendsListManager):
         self.doneStatus['hood'] = base.localAvatar.lastHood
         self.doneStatus['zone'] = base.localAvatar.lastHood
         self.fsm.request('teleportIn', [self.doneStatus])
-        return task.done
+        return task.done if task is not None else None
 
     def notifyUserGoHomeFailed(self):
         self.notify.debug('notifyUserGoHomeFailed')
@@ -716,7 +727,9 @@ class Place(StateData, FriendsListManager):
             if avatar:
                 avName = avatar.getName()
 
-        if avName:
+        if self.doneStatus.get('estateUnavailable'):
+            message = TTLocalizer.EstateUnavailable
+        elif avName:
             message = TTLocalizer.EstateTeleportFailedNotFriends % avName
         else:
             message = TTLocalizer.EstateTeleportFailed

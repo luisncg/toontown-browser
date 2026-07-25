@@ -18,6 +18,7 @@ from toontown.distributed import DelayDelete
 from toontown.toon import TTEmote
 from otp.avatar import Emote
 from toontown.hood import ZoneUtil
+from toontown.building import MegaBuildingGlobals
 FO_DICT = {'s': 'tt_m_ara_cbe_fieldOfficeMoverShaker',
  'l': 'tt_m_ara_cbe_fieldOfficeMoverShaker',
  'm': 'tt_m_ara_cbe_fieldOfficeMoverShaker',
@@ -58,6 +59,10 @@ class DistributedBuilding(DistributedObject.DistributedObject):
          State.State('cogdo', self.enterCogdo, self.exitCogdo, ['waitForVictorsFromCogdo', 'becomingToonFromCogdo'])], 'off', 'off')
         self.fsm.enterInitialState()
         self.bossLevel = 0
+        self.megaFloors = MegaBuildingGlobals.MEGA_MIN_FLOORS
+        self.megaFloorIndicator = []
+        self.megaDisplayActive = False
+        self.megaInfoSign = None
         self.transitionTrack = None
         self.elevatorNodePath = None
         self.victorList = [0,
@@ -107,6 +112,38 @@ class DistributedBuilding(DistributedObject.DistributedObject):
         self.track = suitTrack
         self.difficulty = difficulty
         self.numFloors = numFloors
+
+    def setMegaFloors(self, megaFloors):
+        self.megaFloors = MegaBuildingGlobals.clampMegaFloors(
+            getattr(self, 'numFloors', 1), megaFloors)
+        if self.elevatorModel is not None and self.mode == 'suit':
+            self._setupMegaFloorIndicators()
+            self._setupMegaInfoSign()
+
+    def getMegaFloors(self):
+        return self.megaFloors
+
+    def getFloorIndicatorNode(self, floorNumber):
+        if floorNumber < 0:
+            return None
+        if self.megaDisplayActive:
+            indicators = self.floorIndicator[:self.numFloors] + self.megaFloorIndicator
+            if floorNumber < len(indicators):
+                return indicators[floorNumber]
+            return None
+        if floorNumber < len(self.floorIndicator):
+            return self.floorIndicator[floorNumber]
+        return None
+
+    def setMegaDisplayActive(self, active):
+        self.megaDisplayActive = bool(active)
+        regularColor = Vec4(1.0, 0.82, 0.08, 1.0) if active else LIGHT_OFF_COLOR
+        megaColor = Vec4(1.0, 0.67, 0.02, 1.0) if active else Vec4(0.58, 0.36, 0.03, 1.0)
+        for floor, indicator in enumerate(self.floorIndicator):
+            if indicator is not None and floor < self.numFloors:
+                indicator.setColor(regularColor)
+        for indicator in self.megaFloorIndicator:
+            indicator.setColor(megaColor)
 
     def setState(self, state, timestamp):
         self.fsm.request(state, [globalClockDelta.localElapsedTime(timestamp)])
@@ -313,6 +350,8 @@ class DistributedBuilding(DistributedObject.DistributedObject):
                 else:
                     np.hide()
 
+            self._setupMegaFloorIndicators()
+
         self.elevatorModel.reparentTo(self.elevatorNodePath)
         if self.mode == 'suit':
             self.cab = self.elevatorModel.find('**/elevator')
@@ -340,7 +379,71 @@ class DistributedBuilding(DistributedObject.DistributedObject):
         self.suitDoorOrigin = newNP.find('**/*_door_origin')
         self.elevatorNodePath.reparentTo(self.suitDoorOrigin)
         self.normalizeElevator()
+        if not cogdo:
+            self._setupMegaInfoSign()
         return
+
+    def _setupMegaFloorIndicators(self):
+        for indicator in self.megaFloorIndicator:
+            if indicator is not None and not indicator.isEmpty():
+                indicator.removeNode()
+        self.megaFloorIndicator = []
+        if self.elevatorModel is None or self.mode != 'suit':
+            return
+        source = self.elevatorModel.find('**/floor_light_1')
+        if source.isEmpty():
+            self.notify.warning('Unable to find floor light geometry for Mega dots.')
+            return
+        yellowCount = MegaBuildingGlobals.getYellowFloorCount(
+            self.numFloors, self.megaFloors)
+        sourceCenterX = -1.623
+        spacing = 0.65
+        startX = -spacing * (yellowCount - 1) * 0.5
+        for index in range(yellowCount):
+            indicator = source.copyTo(self.elevatorModel)
+            indicator.setName('mega_floor_light_%s' % (index + 1))
+            indicator.setPos(startX + spacing * index - sourceCenterX, -0.01, -0.82)
+            indicator.setColor(0.58, 0.36, 0.03, 1.0)
+            indicator.show()
+            self.megaFloorIndicator.append(indicator)
+        self.setMegaDisplayActive(self.megaDisplayActive)
+
+    def _setupMegaInfoSign(self):
+        if self.megaInfoSign is not None and not self.megaInfoSign.isEmpty():
+            self.megaInfoSign.removeNode()
+        self.megaInfoSign = None
+        if self.elevatorNodePath is None or self.mode != 'suit':
+            return
+        cardMaker = CardMaker('mega-building-info-sign')
+        cardMaker.setFrame(-3.8, 3.8, 0.0, 4.8)
+        frameMaker = CardMaker('mega-building-info-sign-frame')
+        frameMaker.setFrame(-4.05, 4.05, -0.2, 5.0)
+        frame = self.elevatorNodePath.attachNewNode(frameMaker.generate())
+        frame.setTwoSided(True)
+        frame.setColor(0.95, 0.72, 0.08, 1.0)
+        frame.setPos(6.4, -3.17, 0.25)
+        frame.setScale(0.78)
+        sign = frame.attachNewNode(cardMaker.generate())
+        sign.setTwoSided(True)
+        sign.setColor(0.18, 0.075, 0.025, 1.0)
+        sign.setPos(0.0, -0.04, 0.12)
+        sign.setScale(0.94, 1.0, 0.92)
+        textNode = TextNode('mega-building-info-text')
+        textNode.setAlign(TextNode.ACenter)
+        textNode.setFont(ToontownGlobals.getSuitFont())
+        textNode.setTextColor(1.0, 0.94, 0.55, 1.0)
+        textNode.setWordwrap(21.0)
+        textNode.setText(
+            'COG MEGA-BUILDINGS\n\n'
+            '4 Toons vote unanimously.\n'
+            'Mega opens 4 more spots (8 total).\n'
+            'Regular + yellow dots = Mega floors.\n'
+            'Every floor uses Mega rules!')
+        text = frame.attachNewNode(textNode.generate())
+        text.setPos(0.0, -0.08, 4.35)
+        text.setScale(0.29)
+        text.setAttrib(DepthOffsetAttrib.make(2))
+        self.megaInfoSign = frame
 
     def loadAnimToSuitSfx(self):
         if base.config.GetBool('want-qa-regression', 0):
@@ -474,6 +577,8 @@ class DistributedBuilding(DistributedObject.DistributedObject):
     def cleanupSuitBuilding(self):
         if hasattr(self, 'floorIndicator'):
             del self.floorIndicator
+        self.megaFloorIndicator = []
+        self.megaInfoSign = None
 
     def adjustColorScale(self, scale, node):
         node.setColorScale(scale, scale, scale, 1)

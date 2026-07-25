@@ -1,5 +1,6 @@
 from panda3d.core import ModifierButtons
 from direct.showbase.DirectObject import DirectObject
+from toontown.toonbase import KeybindSettings
 
 class ArrowKeys(DirectObject):
     UP_KEY = 'arrow_up'
@@ -15,6 +16,12 @@ class ArrowKeys(DirectObject):
     NULL_HANDLERS = (None, None, None, None, None)
 
     def __init__(self):
+        movementEvents = KeybindSettings.getActiveMovementEvents()
+        self.UP_KEY = movementEvents['up']
+        self.DOWN_KEY = movementEvents['down']
+        self.LEFT_KEY = movementEvents['left']
+        self.RIGHT_KEY = movementEvents['right']
+        self.JUMP_KEY = movementEvents['jump']
         self.__jumpPost = 0
         self.setPressHandlers(self.NULL_HANDLERS)
         self.setReleaseHandlers(self.NULL_HANDLERS)

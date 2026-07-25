@@ -14,6 +14,7 @@ from toontown.char import Char
 from toontown.suit import SuitDNA
 from toontown.suit import Suit
 from toontown.quest import QuestParser
+import time
 
 class DistributedTutorialInterior(DistributedObject.DistributedObject):
 
@@ -129,7 +130,11 @@ class DistributedTutorialInterior(DistributedObject.DistributedObject):
             self.npc.reparentTo(npcOrigin)
             self.npc.clearMat()
         self.createSuit()
+        tutorialAnimationControlSets = self.prepareTutorialScene()
         self.mickeyMovie = QuestParser.NPCMoviePlayer('tutorial_mickey', base.localAvatar, self.npc)
+        for actor, controlsByAnimation in tutorialAnimationControlSets:
+            self.mickeyMovie.primeAnimationControls(
+                actor, controlsByAnimation)
         place = base.cr.playGame.getPlace()
         if place and hasattr(place, 'fsm') and place.fsm.getCurrentState().getName():
             self.notify.info('Tutorial movie: Place ready.')
@@ -139,6 +144,44 @@ class DistributedTutorialInterior(DistributedObject.DistributedObject):
             if hasattr(place, 'fsm'):
                 self.notify.info('Tutorial movie: place state=%s' % place.fsm.getCurrentState().getName())
             self.acceptOnce('enterTutorialInterior', self.playMovie)
+
+    def prepareTutorialScene(self):
+        startedAt = time.perf_counter()
+        gsg = base.win.getGsg() if base.win else None
+        animationControlSets = []
+        # Panda binds Actor animations lazily.  Tutorial Tom is the first Toon
+        # to use these gestures, so doing the synchronous bind here moves that
+        # one-time cost behind the zone loading screen instead of freezing the
+        # first conversation.
+        animationControlSets.append((
+            self.npc,
+            QuestParser.prepareAnimationControls(
+                self.npc,
+                (
+                    'neutral',
+                    'right-hand-start',
+                    'right-hand',
+                    'right-point-start',
+                    'right-point',
+                ),
+            ),
+        ))
+        animationControlSets.append((
+            base.localAvatar,
+            QuestParser.prepareAnimationControls(
+                base.localAvatar, ('run', 'neutral')),
+        ))
+        # The post-Cog reward creates another Tutorial Tom.  Construct and
+        # bind it now, while this zone's loading screen is still covering the
+        # canvas, so the later reward dialogue cannot freeze visible play.
+        QuestParser.prepareTutorialRewardActor()
+        if gsg:
+            for node in (self.interior, self.street, self.sky,
+                         self.suit, self.npc):
+                node.prepareScene(gsg)
+        elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+        print('[BrowserPerformanceScript] prepare tutorial_intro %s' % elapsedMs)
+        return animationControlSets
 
     def playMovie(self):
         self.notify.info('Tutorial movie: Play.')

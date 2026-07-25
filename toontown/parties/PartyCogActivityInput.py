@@ -1,10 +1,10 @@
 from direct.showbase.DirectObject import DirectObject
 from panda3d.core import ModifierButtons
+from toontown.toonbase import KeybindSettings
 ROTATE_LEFT_KEY = 'arrow_left'
 ROTATE_RIGHT_KEY = 'arrow_right'
 FORWARD_KEY = 'arrow_up'
 BACKWARDS_KEY = 'arrow_down'
-THROW_PIE_KEYS = ['control', 'delete', 'insert']
 
 class PartyCogActivityInput(DirectObject):
     notify = directNotify.newCategory('PartyCogActivityInput')
@@ -30,20 +30,28 @@ class PartyCogActivityInput(DirectObject):
         self.disableThrowPieKeys()
 
     def enableExitActivityKeys(self):
-        self.accept('escape', self.exitActivityCallback)
+        self._exitActivityHotkey = KeybindSettings.getActiveEvent('exitActivity')
+        self.accept(self._exitActivityHotkey, self.exitActivityCallback)
 
     def disableExitActivityKeys(self):
-        self.ignore('escape')
+        hotkey = getattr(self, '_exitActivityHotkey', None)
+        if hotkey:
+            self.ignore(hotkey)
 
     def enableThrowPieKeys(self):
-        for key in THROW_PIE_KEYS:
-            self.accept(key, self.handleThrowPieKeyPressed, [key])
+        self._performActionHotkey = KeybindSettings.getActiveEvent('performAction')
+        self.accept(
+            self._performActionHotkey,
+            self.handleThrowPieKeyPressed,
+            [self._performActionHotkey],
+        )
 
         self.throwPiePressed = False
         self.readyToThrowPie = False
 
     def disableThrowPieKeys(self):
-        for key in THROW_PIE_KEYS:
+        key = getattr(self, '_performActionHotkey', None)
+        if key:
             self.ignore(key)
             self.ignore(key + '-up')
 

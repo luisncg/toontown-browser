@@ -7,6 +7,21 @@ from . import SuitBattleGlobals, BattleExperienceAI
 from toontown.toon import NPCToons
 from toontown.pets import PetTricks, DistributedPetProxyAI
 from direct.showbase.PythonUtil import lerp
+from .ReactiveGagGlobals import (
+    DECOY_TRACK,
+    EMBARRASS_TRACK,
+    FAKE_MOUSTACHE_SUCCESS_CHANCE,
+    REACTIVE_RESULT_FAILURE,
+    REACTIVE_RESULT_NOT_TRIGGERED,
+    REACTIVE_RESULT_PENDING,
+    REACTIVE_RESULT_SUCCESS,
+    WHOOPEE_CUSHION_FLUSTER_TURNS,
+    WHOOPEE_CUSHION_SUCCESS_CHANCE,
+    getWhoopeeCushionSuccessChance,
+    isReactiveTrack,
+    reducedDamage,
+    rollSucceeds,
+)
 
 class BattleCalculatorAI:
     AccuracyBonuses = [
@@ -39,6 +54,7 @@ class BattleCalculatorAI:
         self.battle = battle
         self.SuitAttackers = {}
         self.currentlyLuredSuits = {}
+        self.currentlyFlusteredSuits = {}
         self.successfulLures = {}
         self.toonAtkOrder = []
         self.toonHPAdjusts = {}
@@ -1217,6 +1233,116 @@ class BattleCalculatorAI:
                 self.toonHPAdjusts[t] -= attack[SUIT_HP_COL][position]
                 self.notify.debug('Toon ' + str(t) + ' now has ' + str(self.__getToonHp(t)) + ' health')
 
+    def __reactiveGagSucceeds(self, track, chance=None):
+        forcedResult = simbase.config.GetInt('reactive-gags-force-result', -1)
+        if forcedResult == 0:
+            return False
+        if forcedResult == 1:
+            return True
+        if chance is None:
+            if track == DECOY_TRACK:
+                chance = FAKE_MOUSTACHE_SUCCESS_CHANCE
+            else:
+                chance = WHOOPEE_CUSHION_SUCCESS_CHANCE
+        return rollSucceeds(chance, random.randrange)
+
+    def __resolveReactiveGags(self, suitAttackIndex):
+        """Resolve armed reactions before the pending Cog damage is applied."""
+        suitAttack = self.battle.suitAttacks[suitAttackIndex]
+        if suitAttack[SUIT_ATK_COL] == NO_ATTACK:
+            return
+
+        suitId = suitAttack[SUIT_ID_COL]
+        targetedToons = self.__createSuitTargetList(suitAttackIndex)
+
+        # Embarrass happens as the chosen Cog starts its turn.  A same-Cog
+        # cushion group makes one shared roll: 60% for one cushion and 70% for
+        # any group of two to four.  Extra cushions improve reliability only;
+        # they never stack damage reduction.
+        embarrassReactions = []
+        for toonId in self.battle.activeToons:
+            reaction = self.battle.toonAttacks.get(toonId)
+            if not reaction or reaction[TOON_TRACK_COL] != EMBARRASS_TRACK:
+                continue
+            if reaction[TOON_ACCBONUS_COL] != REACTIVE_RESULT_PENDING:
+                continue
+            if reaction[TOON_TGT_COL] != suitId:
+                continue
+            embarrassReactions.append(reaction)
+
+        embarrassSucceeded = False
+        if embarrassReactions:
+            chance = getWhoopeeCushionSuccessChance(
+                len(embarrassReactions))
+            embarrassSucceeded = self.__reactiveGagSucceeds(
+                EMBARRASS_TRACK, chance=chance)
+
+        for reaction in embarrassReactions:
+            if embarrassSucceeded:
+                reaction[TOON_ACCBONUS_COL] = REACTIVE_RESULT_SUCCESS
+                # This otherwise-unused reactive field carries the initial
+                # status counter to the movie client.
+                reaction[TOON_HPBONUS_COL] = \
+                    WHOOPEE_CUSHION_FLUSTER_TURNS
+            else:
+                reaction[TOON_ACCBONUS_COL] = REACTIVE_RESULT_FAILURE
+
+        if not hasattr(self, 'currentlyFlusteredSuits'):
+            self.currentlyFlusteredSuits = {}
+        if embarrassSucceeded:
+            self.currentlyFlusteredSuits[suitId] = \
+                WHOOPEE_CUSHION_FLUSTER_TURNS
+
+        flusterTurns = self.currentlyFlusteredSuits.get(suitId, 0)
+        suitAttack[SUIT_BEFORE_TOONS_COL] = flusterTurns
+        if flusterTurns > 0:
+            for targetIndex, damage in enumerate(suitAttack[SUIT_HP_COL]):
+                suitAttack[SUIT_HP_COL][targetIndex] = reducedDamage(damage)
+            flusterTurns -= 1
+            if flusterTurns > 0:
+                self.currentlyFlusteredSuits[suitId] = flusterTurns
+            else:
+                self.currentlyFlusteredSuits.pop(suitId, None)
+
+        # A Decoy is tested only when its Toon is actually among this Cog's
+        # targets.  Every armed Toon in a group attack is considered triggered
+        # and spends a Decoy, even if an earlier Toon succeeds.  Any success
+        # convinces the Cog to abandon the whole pending attack.
+        successfulDecoys = []
+        for toonId in self.battle.activeToons:
+            reaction = self.battle.toonAttacks.get(toonId)
+            if not reaction or reaction[TOON_TRACK_COL] != DECOY_TRACK:
+                continue
+            if reaction[TOON_ACCBONUS_COL] != REACTIVE_RESULT_PENDING:
+                continue
+            if toonId not in targetedToons:
+                continue
+            reaction[TOON_TGT_COL] = suitId
+            if self.__reactiveGagSucceeds(DECOY_TRACK):
+                reaction[TOON_ACCBONUS_COL] = REACTIVE_RESULT_SUCCESS
+                successfulDecoys.append(reaction)
+            else:
+                reaction[TOON_ACCBONUS_COL] = REACTIVE_RESULT_FAILURE
+
+        if successfulDecoys:
+            prevented = 0
+            for targetIndex, damage in enumerate(suitAttack[SUIT_HP_COL]):
+                if damage > 0:
+                    prevented += damage
+                    suitAttack[SUIT_HP_COL][targetIndex] = 0
+            for reaction in successfulDecoys:
+                reaction[TOON_HPBONUS_COL] = prevented
+
+    def __finishReactiveGags(self):
+        for toonId in self.battle.activeToons:
+            reaction = self.battle.toonAttacks.get(toonId)
+            if not reaction or not isReactiveTrack(reaction[TOON_TRACK_COL]):
+                continue
+            if reaction[TOON_ACCBONUS_COL] == REACTIVE_RESULT_PENDING:
+                reaction[TOON_ACCBONUS_COL] = REACTIVE_RESULT_NOT_TRIGGERED
+                reaction[TOON_TGT_COL] = -1
+                reaction[TOON_HPBONUS_COL] = 0
+
     def __suitCanAttack(self, suitId):
         if self.__combatantDead(suitId, toon=0) or self.__suitIsLured(suitId) or self.__combatantJustRevived(suitId):
             return 0
@@ -1258,6 +1384,7 @@ class BattleCalculatorAI:
                     attack = self.battle.suitAttacks[i]
                     self.notify.debug('clearing suit attack, no avail targets')
                 self.__calcSuitAtkHp(i)
+                self.__resolveReactiveGags(i)
                 if attack[SUIT_ATK_COL] != NO_ATTACK:
                     if self.__suitAtkAffectsGroup(attack):
                         for currTgt in self.battle.activeToons:
@@ -1284,7 +1411,8 @@ class BattleCalculatorAI:
                     self.__applySuitAttackDamages(i)
                 if self.notify.getDebug():
                     self.notify.debug('Suit attack: ' + str(self.battle.suitAttacks[i]))
-                attack[SUIT_BEFORE_TOONS_COL] = 0
+
+        self.__finishReactiveGags()
 
     def __updateLureTimeouts(self):
         if self.notify.getDebug():
@@ -1422,6 +1550,7 @@ class BattleCalculatorAI:
         if self.notify.getDebug():
             self.notify.debug('suitLeftBattle(): ' + str(suitId))
         self.__removeLured(suitId)
+        self.currentlyFlusteredSuits.pop(suitId, None)
         if suitId in self.SuitAttackers:
             del self.SuitAttackers[suitId]
         self.__removeSuitTrap(suitId)

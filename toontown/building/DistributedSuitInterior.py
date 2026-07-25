@@ -32,27 +32,51 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
         self.BottomFloor_SuitPositions = [Point3(0, 15, 0),
          Point3(10, 20, 0),
          Point3(-7, 24, 0),
-         Point3(-10, 0, 0)]
+         Point3(-10, 0, 0),
+         Point3(15, 15, 0),
+         Point3(18, 24, 0),
+         Point3(-16, 18, 0),
+         Point3(-18, 30, 0)]
         self.BottomFloor_SuitHs = [75,
          170,
          -91,
-         -44]
+         -44,
+         105,
+         145,
+         -80,
+         -115]
         self.Cubicle_SuitPositions = [Point3(0, 18, 0),
          Point3(10, 12, 0),
          Point3(-9, 11, 0),
-         Point3(-3, 13, 0)]
+         Point3(-3, 13, 0),
+         Point3(15, 20, 0),
+         Point3(17, 8, 0),
+         Point3(-15, 19, 0),
+         Point3(-17, 7, 0)]
         self.Cubicle_SuitHs = [170,
          56,
          -52,
-         10]
+         10,
+         145,
+         85,
+         -145,
+         -85]
         self.BossOffice_SuitPositions = [Point3(0, 15, 0),
          Point3(10, 20, 0),
          Point3(-10, 6, 0),
-         Point3(-17, 34, 11)]
+         Point3(-17, 34, 11),
+         Point3(15, 14, 0),
+         Point3(18, 25, 0),
+         Point3(-15, 14, 0),
+         Point3(17, 34, 11)]
         self.BossOffice_SuitHs = [170,
          120,
          12,
-         38]
+         38,
+         140,
+         105,
+         -140,
+         -38]
         self.waitMusic = base.loader.loadMusic('phase_7/audio/bgm/encntr_toon_winning_indoor.ogg')
         self.elevatorMusic = base.loader.loadMusic('phase_7/audio/bgm/tt_elevator.ogg')
         self.fsm = ClassicFSM.ClassicFSM('DistributedSuitInterior', [State.State('WaitForAllToonsInside', self.enterWaitForAllToonsInside, self.exitWaitForAllToonsInside, ['Elevator']),

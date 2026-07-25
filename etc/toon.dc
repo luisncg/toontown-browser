@@ -458,6 +458,8 @@ dclass DistributedToon : DistributedPlayer {
   setTrackProgress(int8 = -1, uint32 = 0) required ownrecv db;
   setTrackBonusLevel(int8[] = [-1, -1, -1, -1, -1, -1, -1]) required broadcast ownrecv db;
   setInventory(blob = [0 * 7, 0 * 7, 0 * 7, 0 * 7, 1, 0 * 6, 1, 0 * 6, 0 * 7]) required ownrecv db;
+  setReactiveGagCounts(uint8 = 10, uint8 = 10) required ownrecv db;
+  requestReactiveGagRefill(uint8) airecv clsend;
   setMaxNPCFriends(uint16 = 16) required ownrecv db;
   setNPCFriendsDict(FriendEntry[]) required ownrecv db;
   setDefaultShard(uint32 = 0) required ownrecv db;
@@ -486,7 +488,7 @@ dclass DistributedToon : DistributedPlayer {
   setTunnelOut(int16, int16/10, int16/10, int16/10, int16/10, int16/100, int32/100) ownsend broadcast;
   setAnimState(char [0-1024], int16/1000, int16) broadcast ram ownsend airecv;
   setEmoteState(int16, int16/1000, int16) broadcast ram ownsend;
-  setEmoteAccess(uint8[] = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) required ownrecv db;
+  setEmoteAccess(uint8[] = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]) required ownrecv db;
   setCustomMessages(uint16[] = []) required ownrecv db;
   setSleepAutoReply(uint32) broadcast clsend ownrecv;
   setResistanceMessages(pair16 [] = []) required ownrecv db;
@@ -500,6 +502,7 @@ dclass DistributedToon : DistributedPlayer {
   setAwardSchedule(blob = []) required ownrecv db airecv;
   setAwardNotify(uint8 = 0) required ownrecv db;
   setCatalogNotify(uint8 = 0, uint8 = 0) required ownrecv db;
+  setEstateTransactionJournal(blob = []) required db;
   playSplashEffect(int16/10, int16/10, int16/10) broadcast ownsend;
   setWhisperSCToontaskFrom(uint32, uint32, uint32, uint32, uint8) ownrecv clsend;
   setSCToontask(uint32, uint32, uint32, uint8) broadcast ownsend;
@@ -983,7 +986,7 @@ dclass DistributedPondBingoManager : DistributedObject {
   setPondDoId(uint32) required broadcast ram;
   updateGameState(uint32, uint8);
   setCardState(uint16, uint8, uint16, uint32);
-  setState(string, int16);
+  setState(string, uint32);
   cardUpdate(uint16, uint8, uint8, uint8) airecv clsend;
   enableBingo();
   handleBingoCall(uint16) airecv clsend;
@@ -1597,6 +1600,7 @@ dclass DistributedTrophyMgr : DistributedObject {
 dclass DistributedBuilding : DistributedObject {
   setBlock(uint16, uint32) required broadcast ram;
   setSuitData(int8, int8, int8) required broadcast ram;
+  setMegaFloors(uint8) required broadcast ram;
   setVictorList(uint32[]) broadcast ram;
   setState(string, int16) broadcast ram;
   setVictorReady() airecv clsend;
@@ -1631,6 +1635,10 @@ dclass DistributedSuitInterior : DistributedObject {
   setAvatarJoined() airecv clsend;
   elevatorDone() airecv clsend;
   reserveJoinDone() airecv clsend;
+};
+
+dclass DistributedMegaSuitInterior : DistributedSuitInterior {
+  setSquads(uint32[], uint32[]) required broadcast ram;
 };
 
 dclass DistributedCogdoBarrel : DistributedObject {
@@ -1967,6 +1975,10 @@ dclass DistributedElevatorFloor : DistributedElevatorFSM {
 
 dclass DistributedElevatorExt : DistributedElevator {
   setFloor(int8) broadcast ram;
+  setMegaState(uint8, uint8, uint8, uint8, int16) required broadcast ram;
+  requestMegaVote(uint8) airecv clsend;
+  requestMegaJoin(uint8) airecv clsend;
+  showMegaJoinPrompt(uint8);
 };
 
 dclass DistributedLawOfficeElevatorExt : DistributedElevatorExt {

@@ -40,6 +40,7 @@ from toontown.quest import QuestParser
 from toontown.toonbase.ToontownGlobals import *
 from toontown.toonbase import ToontownGlobals
 from toontown.toonbase import TTLocalizer
+from toontown.toonbase import KeybindSettings
 from toontown.catalog import CatalogNotifyDialog
 from toontown.chat import ToontownChatManager
 from toontown.chat import TTTalkAssistant
@@ -49,6 +50,7 @@ from toontown.battle import Fanfare
 from toontown.parties import PartyGlobals
 from toontown.toon import ElevatorNotifier
 from toontown.toon import ToonDNA
+from toontown.toon import FreeCamera
 from . import DistributedToon
 from . import Toon
 from . import LaffMeter
@@ -169,6 +171,8 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
             self.oldPos = None
             self.questMap = None
             self.lerpFurnitureButton = None
+            self.freeCamera = FreeCamera.FreeCamera(self)
+            self.accept('shift-f8', self.freeCamera.toggle)
 
     def wantLegacyLifter(self):
         return True
@@ -242,6 +246,9 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         from otp.friends import FriendInfo
 
     def disable(self):
+        if hasattr(self, 'freeCamera') and self.freeCamera is not None:
+            self.freeCamera.destroy()
+            self.freeCamera = None
         self.laffMeter.destroy()
         del self.laffMeter
         self.questMap.destroy()
@@ -320,40 +327,63 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         return
 
     def initInterface(self):
+        interfaceStartedAt = time.perf_counter()
+        interfaceLastAt = interfaceStartedAt
+
+        def recordInterfaceSetup(stage):
+            nonlocal interfaceLastAt
+            now = time.perf_counter()
+            elapsedMs = int((now - interfaceLastAt) * 1000.0)
+            if __astron__:
+                print('[BrowserPerformanceInterface] %s %s' % (
+                    stage, elapsedMs))
+            interfaceLastAt = now
+
         self.newsButtonMgr = NewsPageButtonManager.NewsPageButtonManager()
         self.newsButtonMgr.request('Hidden')
+        recordInterfaceSetup('news_button')
         self.book = ShtikerBook.ShtikerBook('bookDone')
         self.book.load()
         self.book.hideButton()
+        recordInterfaceSetup('book')
         self.optionsPage = OptionsPage.OptionsPage()
         self.optionsPage.load()
         self.book.addPage(self.optionsPage, pageName=TTLocalizer.OptionsPageTitle)
+        recordInterfaceSetup('options')
         self.shardPage = ShardPage.ShardPage()
         self.shardPage.load()
         self.book.addPage(self.shardPage, pageName=TTLocalizer.ShardPageTitle)
+        recordInterfaceSetup('shard')
         self.mapPage = MapPage.MapPage()
         self.mapPage.load()
         self.book.addPage(self.mapPage, pageName=TTLocalizer.MapPageTitle)
+        recordInterfaceSetup('map')
         self.invPage = InventoryPage.InventoryPage()
         self.invPage.load()
         self.book.addPage(self.invPage, pageName=TTLocalizer.InventoryPageTitle)
+        recordInterfaceSetup('inventory')
         self.questPage = QuestPage.QuestPage()
         self.questPage.load()
         self.book.addPage(self.questPage, pageName=TTLocalizer.QuestPageToonTasks)
+        recordInterfaceSetup('quest')
         self.trackPage = TrackPage.TrackPage()
         self.trackPage.load()
         self.book.addPage(self.trackPage, pageName=TTLocalizer.TrackPageShortTitle)
+        recordInterfaceSetup('track')
         self.suitPage = SuitPage.SuitPage()
         self.suitPage.load()
         self.book.addPage(self.suitPage, pageName=TTLocalizer.SuitPageTitle)
+        recordInterfaceSetup('suit')
         if base.config.GetBool('want-photo-album', 0):
             self.photoAlbumPage = PhotoAlbumPage.PhotoAlbumPage()
             self.photoAlbumPage.load()
             self.book.addPage(self.photoAlbumPage, pageName=TTLocalizer.PhotoPageTitle)
+        recordInterfaceSetup('photo')
         self.fishPage = FishPage.FishPage()
         self.fishPage.setAvatar(self)
         self.fishPage.load()
         self.book.addPage(self.fishPage, pageName=TTLocalizer.FishPageTitle)
+        recordInterfaceSetup('fish')
         if base.wantKarts:
             self.addKartPage()
         if self.disguisePageFlag:
@@ -362,11 +392,16 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
             self.loadSosPages()
         if self.gardenStarted:
             self.loadGardenPages()
+        recordInterfaceSetup('optional_pages')
         self.addGolfPage()
+        recordInterfaceSetup('golf')
         self.addEventsPage()
+        recordInterfaceSetup('events')
         if WantNewsPage:
             self.addNewsPage()
+        recordInterfaceSetup('news')
         self.book.setPage(self.mapPage, enterPage=False)
+        recordInterfaceSetup('book_page')
         self.laffMeter = LaffMeter.LaffMeter(self.style, self.hp, self.maxHp)
         self.laffMeter.setAvatar(self)
         self.laffMeter.setScale(0.075)
@@ -375,16 +410,17 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         else:
             self.laffMeter.setPos(-1.2, 0.0, -0.87)
         self.laffMeter.stop()
+        recordInterfaceSetup('laff_meter')
         self.questMap = QuestMap.QuestMap(self)
         self.questMap.stop()
+        recordInterfaceSetup('quest_map')
         if not base.cr.isPaid():
             guiButton = loader.loadModel('phase_3/models/gui/quit_button')
             self.purchaseButton = DirectButton(parent=aspect2d, relief=None, image=(guiButton.find('**/QuitBtn_UP'), guiButton.find('**/QuitBtn_DN'), guiButton.find('**/QuitBtn_RLVR')), image_scale=0.9, text=TTLocalizer.OptionsPagePurchase, text_scale=0.05, text_pos=(0, -0.01), textMayChange=0, pos=(0.885, 0, -0.94), sortOrder=100, command=self.__handlePurchase)
             base.setCellsAvailable([base.bottomCells[4]], 0)
-        self.accept('time-insert', self.__beginTossPie)
-        self.accept('time-insert-up', self.__endTossPie)
-        self.accept('time-delete', self.__beginTossPie)
-        self.accept('time-delete-up', self.__endTossPie)
+        recordInterfaceSetup('purchase')
+        self._performActionHotkey = None
+        self.reloadPerformActionHotkey()
         self.accept('pieHit', self.__pieHit)
         self.accept('interrupt-pie', self.interruptPie)
         self.accept('InputState-jump', self.__toonMoved)
@@ -393,7 +429,14 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         self.accept('InputState-turnLeft', self.__toonMoved)
         self.accept('InputState-turnRight', self.__toonMoved)
         self.accept('InputState-slide', self.__toonMoved)
+        recordInterfaceSetup('controls')
         QuestParser.init()
+        if not self.tutorialAck:
+            QuestParser.preloadTutorialAssets()
+        recordInterfaceSetup('tutorial_assets')
+        totalMs = int((time.perf_counter() - interfaceStartedAt) * 1000.0)
+        if __astron__:
+            print('[BrowserPerformanceInterface] total %s' % totalMs)
         return
 
     def __handlePurchase(self):
@@ -627,6 +670,28 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         self.__beginTossPie(globalClock.getFrameTime())
 
     def __endTossPieMouse(self, mouseParam):
+        self.__endTossPie(globalClock.getFrameTime())
+
+    def reloadPerformActionHotkey(self):
+        previous = getattr(self, '_performActionHotkey', None)
+        if previous:
+            event = 'time-' + previous if previous in ('delete', 'insert') else previous
+            self.ignore(event)
+            self.ignore(event + '-up')
+        self._performActionHotkey = KeybindSettings.getActiveEvent('performAction')
+        event = self._performActionHotkey
+        if event in ('delete', 'insert'):
+            event = 'time-' + event
+            self.accept(event, self.__beginTossPie)
+            self.accept(event + '-up', self.__endTossPie)
+        else:
+            self.accept(event, self.__beginTossPieKey)
+            self.accept(event + '-up', self.__endTossPieKey)
+
+    def __beginTossPieKey(self):
+        self.__beginTossPie(globalClock.getFrameTime())
+
+    def __endTossPieKey(self):
         self.__endTossPie(globalClock.getFrameTime())
 
     def __beginTossPie(self, time):

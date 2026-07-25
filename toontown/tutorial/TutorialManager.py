@@ -35,6 +35,7 @@ class TutorialManager(DistributedObject.DistributedObject):
         messenger.send('skipTutorialAnswered', [allOk])
 
     def enterTutorial(self, branchZone, streetZone, shopZone, hqZone):
+        print('[BrowserPerformanceState] tutorial')
         base.localAvatar.cantLeaveGame = 1
         ZoneUtil.overrideOn(branch=branchZone, exteriorList=[streetZone], interiorList=[shopZone, hqZone])
         messenger.send('startTutorial', [shopZone])

@@ -15,6 +15,8 @@ from toontown.pets import PetCollider, PetSphere, PetLookerAI
 from toontown.pets import PetConstants, PetDNA, PetTraits
 from toontown.pets import PetObserve, PetBrain, PetMood
 from toontown.pets import PetActionFSM, PetBase, PetGoal, PetTricks
+from toontown.estate.EstateTransactionAI import (
+    AstronObjectTransaction, chargeBalances)
 from direct.fsm import FSM
 from toontown.toon import DistributedToonAI
 from toontown.ai import ServerEventBuffer
@@ -65,6 +67,7 @@ class DistributedPetAI(DistributedSmoothNodeAI.DistributedSmoothNodeAI, PetLooke
         self.__generateDistTraitFuncs()
         self.__generateDistMoodFuncs()
         self.busy = 0
+        self._interactionInFlight = False
         self.gaitFSM = ClassicFSM.ClassicFSM('petGaitFSM', [State.State('off', self.gaitEnterOff, self.gaitExitOff),
          State.State('neutral', self.gaitEnterNeutral, self.gaitExitNeutral),
          State.State('happy', self.gaitEnterHappy, self.gaitExitHappy),
@@ -771,10 +774,10 @@ class DistributedPetAI(DistributedSmoothNodeAI.DistributedSmoothNodeAI, PetLooke
         self.__petMovieStart(avatar.doId)
 
     def feed(self, avatar):
-        if avatar.takeMoney(PetConstants.FEED_AMOUNT):
-            self.startLockPetMove(avatar.doId)
-            self.brain.observe(PetObserve.PetActionObserve(PetObserve.Actions.FEED, avatar.doId))
-            self.feedLogger.addEvent()
+        self.startLockPetMove(avatar.doId)
+        self.brain.observe(PetObserve.PetActionObserve(
+            PetObserve.Actions.FEED, avatar.doId))
+        self.feedLogger.addEvent()
 
     def scratch(self, avatar):
         self.startLockPetMove(avatar.doId)
@@ -963,15 +966,78 @@ class DistributedPetAI(DistributedSmoothNodeAI.DistributedSmoothNodeAI, PetLooke
         if mode not in (PetConstants.PET_MOVIE_SCRATCH, PetConstants.PET_MOVIE_FEED, PetConstants.PET_MOVIE_CALL):
             self.air.writeServerEvent('suspicious', avId, 'DistributedPetAI: unknown mode: %s' % mode)
             return
+        avatar = self.air.doId2do.get(avId)
+        if (avatar is None or getattr(avatar, 'zoneId', 0) != self.zoneId or
+                not self.active):
+            self.air.writeServerEvent(
+                'suspicious', avId,
+                'DistributedPetAI: interaction from another zone/state')
+            self.freeAvatar(avId)
+            return
+        if self.isBusy() or self._interactionInFlight:
+            self.freeAvatar(avId)
+            return
+        if mode != PetConstants.PET_MOVIE_FEED:
+            self.__startInteraction(mode, avatar)
+            return
+        balances = chargeBalances(
+            avatar.getMoney(), avatar.getBankMoney(),
+            PetConstants.FEED_AMOUNT)
+        if balances is None:
+            self.freeAvatar(avId)
+            return
+        oldFields = {
+            'setMoney': avatar.getMoney(),
+            'setBankMoney': avatar.getBankMoney(),
+        }
+        newFields = {
+            'setMoney': balances[0],
+            'setBankMoney': balances[1],
+        }
+        self._interactionInFlight = True
+
+        def committed(success, conflicts):
+            self._interactionInFlight = False
+            if not success:
+                if conflicts:
+                    if 'setMoney' in conflicts:
+                        avatar.setMoney(conflicts['setMoney'])
+                        avatar.d_setMoney(conflicts['setMoney'])
+                    if 'setBankMoney' in conflicts:
+                        avatar.setBankMoney(conflicts['setBankMoney'])
+                        avatar.d_setBankMoney(conflicts['setBankMoney'])
+                self.freeAvatar(avId)
+                return
+            avatar.setMoney(balances[0])
+            avatar.d_setMoney(balances[0])
+            avatar.setBankMoney(balances[1])
+            avatar.d_setBankMoney(balances[1])
+            current = self.air.doId2do.get(avId)
+            if current is None or getattr(current, 'zoneId', 0) != self.zoneId:
+                self.freeAvatar(avId)
+                return
+            self.__startInteraction(mode, current)
+
+        AstronObjectTransaction(
+            self.air, avatar.doId,
+            self.air.dclassesByName['DistributedToonAI']).commit(
+                oldFields, newFields, committed)
+
+    def __startInteraction(self, mode, avatar):
+        avId = avatar.doId
         if self.avatarInteract(avId):
-            self.notify.debug('handleAvPetInteraction() avatarInteract calling callback')
+            self.notify.debug(
+                'handleAvPetInteraction() avatarInteract calling callback')
             self.movieMode = mode
-            callback = {PetConstants.PET_MOVIE_SCRATCH: self.scratch,
-             PetConstants.PET_MOVIE_FEED: self.feed,
-             PetConstants.PET_MOVIE_CALL: self.call}.get(mode)
-            callback(self.air.doId2do.get(avId))
+            callback = {
+                PetConstants.PET_MOVIE_SCRATCH: self.scratch,
+                PetConstants.PET_MOVIE_FEED: self.feed,
+                PetConstants.PET_MOVIE_CALL: self.call,
+            }[mode]
+            callback(avatar)
         else:
-            self.notify.debug('handleAvPetInteraction() avatarInteract was busy or unhappy')
+            self.notify.debug(
+                'handleAvPetInteraction() avatarInteract was busy or unhappy')
 
     def __petMovieStart(self, avId):
         self.d_setMovie(avId, self.movieMode)

@@ -19,6 +19,7 @@ from toontown.toonbase import TTLocalizer
 from toontown.pets import PetConstants
 from direct.gui.DirectGui import DGG
 from toontown.battle import FireCogPanel
+from toontown.battle.ReactiveGagGlobals import DECOY_TRACK, EMBARRASS_TRACK, isReactiveTrack
 
 class TownBattle(StateData.StateData):
     notify = DirectNotifyGlobal.directNotify.newCategory('TownBattle')
@@ -271,6 +272,12 @@ class TownBattle(StateData.StateData):
                 elif tracks[i] == BattleBase.SOS or tracks[i] == BattleBase.NPCSOS or tracks[i] == BattleBase.PETSOS:
                     numTargets = 0
                     target = -2
+                elif tracks[i] == DECOY_TRACK:
+                    numTargets = 0
+                    target = -2
+                elif tracks[i] == EMBARRASS_TRACK:
+                    numTargets = self.numCogs
+                    target = targets[i]
                 elif tracks[i] == HEAL_TRACK:
                     numTargets = self.numToons
                     if self.__isGroupHeal(levels[i]):
@@ -292,7 +299,7 @@ class TownBattle(StateData.StateData):
     def chooseDefaultTarget(self):
         if self.track > -1:
             response = {}
-            response['mode'] = 'Attack'
+            response['mode'] = 'Reactive' if isReactiveTrack(self.track) else 'Attack'
             response['track'] = self.track
             response['level'] = self.level
             response['target'] = self.target
@@ -390,6 +397,39 @@ class TownBattle(StateData.StateData):
                 response['level'] = self.level
                 response['target'] = 0
                 messenger.send(self.battleEvent, [response])
+        elif mode == 'Reactive':
+            self.track = doneStatus['track']
+            self.level = doneStatus['level']
+            self.toonPanels[self.localNum].setValues(self.localNum, self.track, self.level)
+            if self.track == DECOY_TRACK:
+                self.target = self.localNum
+                response = {
+                    'mode': 'Reactive',
+                    'track': self.track,
+                    'level': self.level,
+                    'target': self.target,
+                }
+                messenger.send(self.battleEvent, [response])
+                self.fsm.request('AttackWait')
+            elif self.__isCogChoiceNecessary():
+                self.fsm.request('ChooseCog')
+                response = {
+                    'mode': 'Reactive',
+                    'track': self.track,
+                    'level': self.level,
+                    'target': -1,
+                }
+                messenger.send(self.battleEvent, [response])
+            else:
+                self.target = 0
+                response = {
+                    'mode': 'Reactive',
+                    'track': self.track,
+                    'level': self.level,
+                    'target': self.target,
+                }
+                messenger.send(self.battleEvent, [response])
+                self.fsm.request('AttackWait')
         elif mode == 'Run':
             self.fsm.request('Run')
         elif mode == 'SOS':
@@ -486,7 +526,7 @@ class TownBattle(StateData.StateData):
             self.target = self.cog
             self.fsm.request('AttackWait')
             response = {}
-            response['mode'] = 'Attack'
+            response['mode'] = 'Reactive' if isReactiveTrack(self.track) else 'Attack'
             response['track'] = self.track
             response['level'] = self.level
             response['target'] = self.cog
@@ -672,6 +712,8 @@ class TownBattle(StateData.StateData):
             self.fsm.request('SOS')
 
     def __isCogChoiceNecessary(self):
+        if self.track == DECOY_TRACK:
+            return 0
         if self.numCogs > 1 and not self.__isGroupAttack(self.track, self.level):
             return 1
         else:

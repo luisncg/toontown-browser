@@ -1,0 +1,84 @@
+diff --git a/dtool/src/prc/notifyCategoryProxy.I b/dtool/src/prc/notifyCategoryProxy.I
+--- a/dtool/src/prc/notifyCategoryProxy.I
++++ b/dtool/src/prc/notifyCategoryProxy.I
+@@ -33,10 +33,20 @@ init() {
+ template<class GetCategory>
+ INLINE NotifyCategory *NotifyCategoryProxy<GetCategory>::
+ get_unsafe_ptr() {
++#ifdef __EMSCRIPTEN__
++  // Static constructor order is not stable when Panda3D's component archives
++  // are linked into a single WebAssembly module.  Lazy initialization is the
++  // documented purpose of this proxy, so do it before evaluating the debug
++  // assertion that Emscripten exposes to Python as an AssertionError.
++  if (_ptr == nullptr) {
++    init();
++  }
++#else
+   nassertd(_ptr != nullptr) {
+     init();
+     nout << "Uninitialized notify proxy: " << _ptr->get_fullname() << "\n";
+   }
++#endif
+   return _ptr;
+ }
+ 
+diff --git a/panda/src/pipeline/config_pipeline.cxx b/panda/src/pipeline/config_pipeline.cxx
+--- a/panda/src/pipeline/config_pipeline.cxx
++++ b/panda/src/pipeline/config_pipeline.cxx
+@@ -25,22 +25,20 @@
+   #error Buildsystem error: BUILDING_PANDA_PIPELINE not defined
+ #endif
+ 
+-ConfigureDef(config_pipeline);
+-NotifyCategoryDef(pipeline, "");
+-NotifyCategoryDef(thread, "");
+-
+-ConfigureFn(config_pipeline) {
+-  init_libpipeline();
+-}
+-
++#ifdef __EMSCRIPTEN__
++  #define PIPELINE_CONFIG_INIT_PRIORITY __attribute__((init_priority(101)))
++#else
++  #define PIPELINE_CONFIG_INIT_PRIORITY
++#endif
++
+-ConfigVariableBool support_threads
++PIPELINE_CONFIG_INIT_PRIORITY ConfigVariableBool support_threads
+ ("support-threads", true,
+  PRC_DESC("Set this false to disallow the creation of threads using Panda's "
+           "Thread interface, even if threading support is compiled in.  This "
+           "does not affect the operation of mutexes and other synchronization "
+           "primitives, just the creation of threads."));
+ 
+-ConfigVariableBool name_deleted_mutexes
++PIPELINE_CONFIG_INIT_PRIORITY ConfigVariableBool name_deleted_mutexes
+ ("name-deleted-mutexes", false,
+  PRC_DESC("Set this true to allocate a name to each Mutex object that "
+           "destructs, so if the Mutex is locked after destruction, we can "
+@@ -51,12 +49,24 @@ ConfigVariableBool name_deleted_mutexes
+           "It is not guaranteed to work, of course, because the memory "
+           "for a deleted Mutex may become reused for some other purpose."));
+ 
+-ConfigVariableInt thread_stack_size
++PIPELINE_CONFIG_INIT_PRIORITY ConfigVariableInt thread_stack_size
+ ("thread-stack-size", 4194304,
+  PRC_DESC("Specifies the minimum size, in bytes, of the stack that will be "
+           "created for each newly-created thread.  Not all thread "
+           "implementations respect this value."));
+ 
++ConfigureDef(config_pipeline);
++NotifyCategoryDef(pipeline, "");
++NotifyCategoryDef(thread, "");
++
++ConfigureFn(config_pipeline) {
++#ifndef __EMSCRIPTEN__
++  init_libpipeline();
++#endif
++}
++
++#undef PIPELINE_CONFIG_INIT_PRIORITY
++
+ /**
+  * Initializes the library.  This must be called at least once before any of
+  * the functions or classes in this library can be used.  Normally it will be

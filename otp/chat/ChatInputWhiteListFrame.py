@@ -163,6 +163,7 @@ class ChatInputWhiteListFrame(FSM.FSM, DirectFrame):
         return result
 
     def activate(self):
+        self.chatEntry['suppressKeys'] = 1
         self.chatEntry['focus'] = 1
         self.show()
         self.active = 1
@@ -171,6 +172,7 @@ class ChatInputWhiteListFrame(FSM.FSM, DirectFrame):
     def deactivate(self):
         self.chatEntry.set('')
         self.chatEntry['focus'] = 0
+        self.chatEntry['suppressKeys'] = 0
         self.hide()
         self.active = 0
 

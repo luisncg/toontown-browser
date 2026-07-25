@@ -5,6 +5,7 @@ from direct.task import Task
 from toontown.toon import NPCToons
 from toontown.hood import ZoneUtil
 from toontown.toonbase import ToontownGlobals
+from toontown.toonbase import KeybindSettings
 from toontown.quest import Quests
 from toontown.suit import SuitPlannerBase
 from . import QuestMapGlobals
@@ -277,15 +278,18 @@ class QuestMap(DirectFrame):
             self.updateMarker = True
 
     def acceptOnscreenHooks(self):
+        self.ignoreOnscreenHooks()
+        self._viewStreetMapHotkey = KeybindSettings.getActiveEvent('viewStreetMap')
         if self.wantToggle:
-            self.accept(ToontownGlobals.MapHotkey, self.toggle)
+            self.accept(self._viewStreetMapHotkey, self.toggle)
         else:
-            self.accept(ToontownGlobals.MapHotkeyOn, self.show)
-            self.accept(ToontownGlobals.MapHotkeyOff, self.hide)
+            self.accept(self._viewStreetMapHotkey, self.show)
+            self.accept(self._viewStreetMapHotkey + '-up', self.hide)
         self.updateMap()
 
     def ignoreOnscreenHooks(self):
-        self.ignore(ToontownGlobals.MapHotkey)
-        self.ignore(ToontownGlobals.MapHotkeyOn)
-        self.ignore(ToontownGlobals.MapHotkeyOff)
+        hotkey = getattr(self, '_viewStreetMapHotkey', None)
+        if hotkey:
+            self.ignore(hotkey)
+            self.ignore(hotkey + '-up')
         self.obscureButton()

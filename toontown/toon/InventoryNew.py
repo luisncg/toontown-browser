@@ -8,6 +8,14 @@ from direct.interval.IntervalGlobal import *
 from direct.directnotify import DirectNotifyGlobal
 from toontown.toonbase import ToontownGlobals
 from otp.otpbase import OTPGlobals
+from toontown.battle.ReactiveGagGlobals import (
+    DECOY_TRACK,
+    EMBARRASS_TRACK,
+    MAX_REACTIVE_GAG_COUNT,
+    NUM_REACTIVE_LEVELS,
+    getReactiveGagName,
+    getReactiveTrackName,
+)
 
 class InventoryNew(InventoryBase.InventoryBase, DirectFrame):
     notify = DirectNotifyGlobal.directNotify.newCategory('InventoryNew')
@@ -50,6 +58,7 @@ class InventoryNew(InventoryBase.InventoryBase, DirectFrame):
         self.propAndOrganicBonusStack = base.config.GetBool('prop-and-organic-bonus-stack', 0)
         self.propBonusIval = Parallel()
         self.activateMode = 'book'
+        self.battleGagView = 'regular'
         self.load()
         self.hide()
         return
@@ -260,6 +269,53 @@ class InventoryNew(InventoryBase.InventoryBase, DirectFrame):
             pass
         else:
             messenger.send('inventory-selection', [track, level])
+
+    def __handleReactiveSelection(self, track, level):
+        messenger.send('reactive-inventory-selection', [track, level])
+
+    def __handleReactiveRefill(self, track):
+        self.toon.d_requestReactiveGagRefill(track)
+
+    def updateReactiveGagControls(self):
+        if not hasattr(self, 'reactiveButtons'):
+            return
+        tracks = (DECOY_TRACK, EMBARRASS_TRACK)
+        for rowIndex, track in enumerate(tracks):
+            count = self.toon.getReactiveGagCount(track)
+            button = self.reactiveButtons[rowIndex][0]
+            button['text'] = '%s\n%d / %d' % (
+                getReactiveGagName(track, 0), count,
+                MAX_REACTIVE_GAG_COUNT)
+            button['state'] = DGG.NORMAL if count > 0 else DGG.DISABLED
+            if count > 0:
+                button['image_color'] = (0.62, 0.18, 0.72, 1)
+            else:
+                button['image_color'] = self.UnpressableImageColor
+        if hasattr(self, 'reactiveRefillButtons'):
+            for rowIndex, track in enumerate(tracks):
+                count = self.toon.getReactiveGagCount(track)
+                self.reactiveRefillButtons[rowIndex]['text'] = (
+                    'Refill %s  %d/%d' % (
+                        getReactiveTrackName(track), count,
+                        MAX_REACTIVE_GAG_COUNT))
+
+    def __showRegularBattleGags(self):
+        self.battleGagView = 'regular'
+        self.reactiveFrame.hide()
+        self.invFrame.show()
+        self.reactiveToggleButton['text'] = 'Reactive Gags'
+
+    def __showReactiveBattleGags(self):
+        self.battleGagView = 'reactive'
+        self.invFrame.hide()
+        self.reactiveFrame.show()
+        self.reactiveToggleButton['text'] = 'Regular Gags'
+
+    def __toggleBattleGagView(self):
+        if self.battleGagView == 'regular':
+            self.__showReactiveBattleGags()
+        else:
+            self.__showRegularBattleGags()
 
     def __handleRun(self):
         messenger.send('inventory-run')
@@ -891,6 +947,9 @@ class InventoryNew(InventoryBase.InventoryBase, DirectFrame):
         self.detailFrame.setScale(1)
         self.deleteEnterButton.hide()
         self.deleteExitButton.hide()
+        self.updateReactiveGagControls()
+        self.reactiveToggleButton.hide()
+        self.__showRegularBattleGags()
         if self.bldg == 1:
             self.runButton.hide()
             self.sosButton.show()
@@ -938,6 +997,8 @@ class InventoryNew(InventoryBase.InventoryBase, DirectFrame):
 
     def battleDeactivateButtons(self):
         self.invFrame.reparentTo(self)
+        self.reactiveFrame.hide()
+        self.reactiveToggleButton.hide()
         self.battleFrame.hide()
         self.stopAndClearPropBonusIval()
 
@@ -1194,6 +1255,65 @@ class InventoryNew(InventoryBase.InventoryBase, DirectFrame):
         self.sosButton = DirectButton(parent=self.battleFrame, relief=None, pos=(0.96, 0, -0.398), text=TTLocalizer.InventorySOS, text_scale=0.05, text_pos=(0, -0.02), text_fg=Vec4(1, 1, 1, 1), textMayChange=0, image=(self.upButton, self.downButton, self.rolloverButton), image_scale=1.05, image_color=(0, 0.6, 1, 1), command=self.__handleSOS)
         self.passButton = DirectButton(parent=self.battleFrame, relief=None, pos=(0.96, 0, -0.242), text=TTLocalizer.InventoryPass, text_scale=TTLocalizer.INpassButton, text_pos=(0, -0.02), text_fg=Vec4(1, 1, 1, 1), textMayChange=1, image=(self.upButton, self.downButton, self.rolloverButton), image_scale=1.05, image_color=(0, 0.6, 1, 1), command=self.__handlePass)
         self.fireButton = DirectButton(parent=self.battleFrame, relief=None, pos=(0.73, 0, -0.242), text=TTLocalizer.InventoryFire, text_scale=TTLocalizer.INfireButton, text_pos=(0, -0.02), text_fg=Vec4(1, 1, 1, 1), textMayChange=0, image=(self.upButton, self.downButton, self.rolloverButton), image_scale=1.05, image_color=(0, 0.6, 1, 1), command=self.__handleFire)
+        self.reactiveToggleButton = DirectButton(
+            parent=self.battleFrame, relief=None, pos=(-0.73, 0, -0.48),
+            text='Reactive Gags', text_scale=0.045, text_pos=(0, -0.015),
+            text_fg=Vec4(1, 1, 1, 1), textMayChange=1,
+            image=(self.upButton, self.downButton, self.rolloverButton),
+            image_scale=(1.45, 1, 1.05), image_color=(0.72, 0.26, 0.72, 1),
+            command=self.__toggleBattleGagView)
+        self.reactiveToggleButton.hide()
+        self.reactiveFrame = DirectFrame(parent=self.battleFrame, relief=None,
+                                         pos=(-0.26, 0, 0.35))
+        self.reactiveRows = []
+        self.reactiveButtons = []
+        reactiveTracks = (DECOY_TRACK, EMBARRASS_TRACK)
+        reactiveColors = ((0.48, 0.78, 0.95, 1), (0.96, 0.48, 0.68, 1))
+        for rowIndex, track in enumerate(reactiveTracks):
+            row = DirectFrame(parent=self.reactiveFrame, image=self.rowModel,
+                              scale=(1.0, 1.0, 1.1),
+                              pos=(0, 0.3, -0.12 - rowIndex * 0.22),
+                              image_color=reactiveColors[rowIndex],
+                              state=DGG.NORMAL, relief=None)
+            self.reactiveRows.append(row)
+            DirectLabel(parent=row, relief=None, pos=(-0.785, -0.1, 0.01),
+                        text=TextEncoder.upper(getReactiveTrackName(track)),
+                        scale=0.052, text_fg=(0.15, 0.15, 0.15, 1),
+                        text_font=getInterfaceFont(), text_align=TextNode.ALeft)
+            rowButtons = []
+            for level in range(NUM_REACTIVE_LEVELS):
+                isAvailable = level == 0
+                label = getReactiveGagName(track, level) if isAvailable else '?'
+                button = DirectButton(
+                    parent=row, image=(self.upButton, self.downButton,
+                                       self.rolloverButton, self.flatButton),
+                    text=label, text_scale=0.031 if isAvailable else 0.065,
+                    text_align=TextNode.ACenter, text_pos=(0, -0.02),
+                    text_wordwrap=5.2, text_fg=Vec4(1, 1, 1, 1),
+                    textMayChange=1 if isAvailable else 0, relief=None,
+                    image_color=(0.62, 0.18, 0.72, 1) if isAvailable else (0.3, 0.3, 0.3, 0.8),
+                    pos=(self.ButtonXOffset + level * self.ButtonXSpacing - 0.065,
+                         -0.1, 0),
+                    command=self.__handleReactiveSelection if isAvailable else None,
+                    extraArgs=[track, level] if isAvailable else [],
+                    state=DGG.NORMAL if isAvailable else DGG.DISABLED)
+                rowButtons.append(button)
+            self.reactiveButtons.append(rowButtons)
+        self.reactiveRefillButtons = []
+        for rowIndex, track in enumerate(reactiveTracks):
+            refillButton = DirectButton(
+                parent=self.reactiveFrame, relief=None,
+                pos=(0.02 + rowIndex * 0.62, 0, -0.62),
+                text='', text_scale=0.035, text_pos=(0, -0.014),
+                text_fg=Vec4(1, 1, 1, 1), textMayChange=1,
+                image=(self.upButton, self.downButton, self.rolloverButton),
+                image_scale=(1.55, 1, 0.9),
+                image_color=reactiveColors[rowIndex],
+                command=self.__handleReactiveRefill,
+                extraArgs=[track])
+            self.reactiveRefillButtons.append(refillButton)
+        self.updateReactiveGagControls()
+        self.reactiveFrame.hide()
         self.tutText = DirectFrame(parent=self.battleFrame, relief=None, pos=(0.05, 0, -0.1133), scale=0.143, image=DGG.getDefaultDialogGeom(), image_scale=5.125, image_pos=(0, 0, -0.65), image_color=ToontownGlobals.GlobalDialogColor, text_scale=TTLocalizer.INclickToAttack, text=TTLocalizer.InventoryClickToAttack, textMayChange=0)
         self.tutText.hide()
         self.tutArrows = BlinkingArrows.BlinkingArrows(parent=self.battleFrame)

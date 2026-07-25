@@ -18234,7 +18234,9 @@ class MaxHpReward(Reward):
         maxHp = av.getMaxHp()
         maxHp = min(ToontownGlobals.MaxHpLimit, maxHp + self.getAmount())
         av.b_setMaxHp(maxHp)
-        av.toonUp(maxHp)
+        # QuestManagerAI performs the standard full heal immediately after
+        # granting every quest reward.  Sending another full heal here caused
+        # duplicate hp/toonUp updates specifically for Max Laff rewards.
 
     def countReward(self, qrc):
         qrc.maxHp += self.getAmount()

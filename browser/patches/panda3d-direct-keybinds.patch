@@ -1,0 +1,153 @@
+diff --git a/direct/src/controls/ControlManager.py b/direct/src/controls/ControlManager.py
+index d1a752e9e..76c6177d6 100755
+--- a/direct/src/controls/ControlManager.py
++++ b/direct/src/controls/ControlManager.py
+@@ -14,7 +14,7 @@ from direct.directnotify import DirectNotifyGlobal
+ #if __debug__:
+ #    import DevWalker
+ from direct.task import Task
+-from panda3d.core import ConfigVariableBool
++from panda3d.core import ConfigVariableBool, ConfigVariableString
+ 
+ # This is a hack, it may be better to use a line instead of a ray.
+ CollisionHandlerRayStart = 4000.0
+@@ -23,6 +23,14 @@ CollisionHandlerRayStart = 4000.0
+ class ControlManager:
+     notify = DirectNotifyGlobal.directNotify.newCategory("ControlManager")
+     wantWASD = ConfigVariableBool('want-WASD', False)
++    keybindVariables = {
++        'forward': ConfigVariableString('keybind-forward', 'w'),
++        'reverse': ConfigVariableString('keybind-reverse', 's'),
++        'turnLeft': ConfigVariableString('keybind-turn-left', 'a'),
++        'turnRight': ConfigVariableString('keybind-turn-right', 'd'),
++        'jump': ConfigVariableString('keybind-jump', 'space'),
++    }
++    keybindInputSource = 'CustomKeybind'
+ 
+     def __init__(self, enable=True, passMessagesThrough = False):
+         assert self.notify.debug("init control manager %s" % (passMessagesThrough))
+@@ -41,16 +49,36 @@ class ControlManager:
+         #self.monitorTask = taskMgr.add(self.monitor, "ControlManager-%s"%(id(self)), priority=-1)
+         self.forceAvJumpToken = None
+ 
+-        if self.passMessagesThrough: # for not breaking toontown
+-            ist=self.inputStateTokens
+-            ist.append(inputState.watchWithModifiers("forward", "arrow_up", inputSource=inputState.ArrowKeys))
+-            ist.append(inputState.watchWithModifiers("reverse", "arrow_down", inputSource=inputState.ArrowKeys))
+-            ist.append(inputState.watchWithModifiers("turnLeft", "arrow_left", inputSource=inputState.ArrowKeys))
+-            ist.append(inputState.watchWithModifiers("turnRight", "arrow_right", inputSource=inputState.ArrowKeys))
+-
+     def __str__(self):
+         return 'ControlManager: using \'%s\'' % self.currentControlsName
+ 
++    def _getKeybind(self, action):
++        return self.keybindVariables[action].value.strip()
++
++    def _watchKeybind(self, action):
++        key = self._getKeybind(action)
++        if key in ('alt', 'control', 'shift'):
++            return inputState.watch(
++                action, key, '%s-up' % key,
++                inputSource=self.keybindInputSource)
++        return inputState.watchWithModifiers(
++            action, key, inputSource=self.keybindInputSource)
++
++    def _addPassThroughKeybinds(self):
++        for action in ('forward', 'reverse', 'turnLeft', 'turnRight'):
++            self.inputStateTokens.append(self._watchKeybind(action))
++
++    def _clearKeybindState(self):
++        for action in self.keybindVariables:
++            inputState.set(action, False, inputSource=self.keybindInputSource)
++
++    def reloadKeybindings(self):
++        """Reinstall key watches after their ConfigVariables change."""
++        wasEnabled = self.isEnabled
++        self.disable()
++        if wasEnabled:
++            self.enable()
++
+     def add(self, controls, name="basic"):
+         """Add a control instance to the list of available control systems.
+ 
+@@ -198,6 +226,13 @@ class ControlManager:
+             assert self.notify.debug('already isEnabled')
+             return
+ 
++        # A disabled pass-through manager retains lightweight movement
++        # watches. Replace them before enabling the complete control set.
++        for token in self.inputStateTokens:
++            token.release()
++        self.inputStateTokens = []
++        self._clearKeybindState()
++
+         self.isEnabled = 1
+ 
+         # keep track of what we do on the inputState so we can undo it later on
+@@ -205,18 +240,18 @@ class ControlManager:
+         ist = self.inputStateTokens
+         ist.append(inputState.watch("run", 'runningEvent', "running-on", "running-off"))
+ 
+-        ist.append(inputState.watchWithModifiers("forward", "arrow_up", inputSource=inputState.ArrowKeys))
++        ist.append(self._watchKeybind("forward"))
+         ist.append(inputState.watch("forward", "force-forward", "force-forward-stop"))
+ 
+-        ist.append(inputState.watchWithModifiers("reverse", "arrow_down", inputSource=inputState.ArrowKeys))
++        ist.append(self._watchKeybind("reverse"))
+         ist.append(inputState.watchWithModifiers("reverse", "mouse4", inputSource=inputState.Mouse))
+ 
+         if self.wantWASD:
+-            ist.append(inputState.watchWithModifiers("turnLeft", "arrow_left", inputSource=inputState.ArrowKeys))
++            ist.append(self._watchKeybind("turnLeft"))
+             ist.append(inputState.watch("turnLeft", "mouse-look_left", "mouse-look_left-done"))
+             ist.append(inputState.watch("turnLeft", "force-turnLeft", "force-turnLeft-stop"))
+ 
+-            ist.append(inputState.watchWithModifiers("turnRight", "arrow_right", inputSource=inputState.ArrowKeys))
++            ist.append(self._watchKeybind("turnRight"))
+             ist.append(inputState.watch("turnRight", "mouse-look_right", "mouse-look_right-done"))
+             ist.append(inputState.watch("turnRight", "force-turnRight", "force-turnRight-stop"))
+ 
+@@ -228,19 +263,15 @@ class ControlManager:
+ 
+             self.setWASDTurn(self.__WASDTurn)
+         else:
+-            ist.append(inputState.watchWithModifiers("turnLeft", "arrow_left", inputSource=inputState.ArrowKeys))
++            ist.append(self._watchKeybind("turnLeft"))
+             ist.append(inputState.watch("turnLeft", "mouse-look_left", "mouse-look_left-done"))
+             ist.append(inputState.watch("turnLeft", "force-turnLeft", "force-turnLeft-stop"))
+ 
+-            ist.append(inputState.watchWithModifiers("turnRight", "arrow_right", inputSource=inputState.ArrowKeys))
++            ist.append(self._watchKeybind("turnRight"))
+             ist.append(inputState.watch("turnRight", "mouse-look_right", "mouse-look_right-done"))
+             ist.append(inputState.watch("turnRight", "force-turnRight", "force-turnRight-stop"))
+ 
+-        # Jump controls
+-        if self.wantWASD:
+-            ist.append(inputState.watchWithModifiers("jump", "space"))
+-        else:
+-            ist.append(inputState.watch("jump", "control", "control-up"))
++        ist.append(self._watchKeybind("jump"))
+ 
+         if self.currentControls:
+             self.currentControls.enableAvatarControls()
+@@ -252,6 +283,7 @@ class ControlManager:
+         for token in self.inputStateTokens:
+             token.release()
+         self.inputStateTokens = []
++        self._clearKeybindState()
+ 
+         for token in self.WASDTurnTokens:
+             token.release()
+@@ -261,11 +293,7 @@ class ControlManager:
+             self.currentControls.disableAvatarControls()
+ 
+         if self.passMessagesThrough: # for not breaking toontown
+-            ist=self.inputStateTokens
+-            ist.append(inputState.watchWithModifiers("forward", "arrow_up", inputSource=inputState.ArrowKeys))
+-            ist.append(inputState.watchWithModifiers("reverse", "arrow_down", inputSource=inputState.ArrowKeys))
+-            ist.append(inputState.watchWithModifiers("turnLeft", "arrow_left", inputSource=inputState.ArrowKeys))
+-            ist.append(inputState.watchWithModifiers("turnRight", "arrow_right", inputSource=inputState.ArrowKeys))
++            self._addPassThroughKeybinds()
+ 
+     def stop(self):
+         self.disable()

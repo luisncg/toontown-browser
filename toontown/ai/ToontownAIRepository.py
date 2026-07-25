@@ -19,6 +19,7 @@ from toontown.coghq.PromotionManagerAI import PromotionManagerAI
 from toontown.distributed.ToontownDistrictAI import ToontownDistrictAI
 from toontown.distributed.ToontownDistrictStatsAI import ToontownDistrictStatsAI
 from toontown.distributed.ToontownInternalRepository import ToontownInternalRepository
+from toontown.estate.EstateManagerAI import EstateManagerAI
 from toontown.hood import ZoneUtil
 from toontown.hood.BRHoodDataAI import BRHoodDataAI
 from toontown.hood.BossbotHQDataAI import BossbotHQDataAI
@@ -37,6 +38,8 @@ from toontown.pets.PetManagerAI import PetManagerAI
 from toontown.quest.QuestManagerAI import QuestManagerAI
 from toontown.racing import RaceGlobals
 from toontown.fishing.DistributedFishingPondAI import DistributedFishingPondAI
+from toontown.fishing.FishBingoManagerAI import FishBingoManagerAI
+from toontown.fishing.FishManagerAI import FishManagerAI
 from toontown.racing.DistributedLeaderBoardAI import DistributedLeaderBoardAI
 from toontown.racing.DistributedRacePadAI import DistributedRacePadAI
 from toontown.racing.DistributedStartingBlockAI import DistributedStartingBlockAI
@@ -45,6 +48,7 @@ from toontown.racing.DistributedViewPadAI import DistributedViewPadAI
 from toontown.racing.RaceManagerAI import RaceManagerAI
 from toontown.uberdog.DistributedPartyManagerAI import DistributedPartyManagerAI
 from toontown.safezone.SafeZoneManagerAI import SafeZoneManagerAI
+from toontown.safezone.DistributedFishingSpotAI import DistributedFishingSpotAI
 from toontown.shtiker.CogPageManagerAI import CogPageManagerAI
 from toontown.spellbook.ToontownMagicWordManagerAI import ToontownMagicWordManagerAI
 from toontown.suit.SuitInvasionManagerAI import SuitInvasionManagerAI
@@ -94,6 +98,9 @@ class ToontownAIRepository(ToontownInternalRepository):
         self.safeZoneManager = None
         self.magicWordManager = None
         self.partyManager = None
+        self.estateMgr = None
+        self.fishManager = None
+        self.bingoManager = None
         self.zoneTable = {}
         self.dnaStoreMap = {}
         self.dnaDataMap = {}
@@ -147,6 +154,14 @@ class ToontownAIRepository(ToontownInternalRepository):
 
         # Create our pet manager...
         self.petMgr = PetManagerAI(self)
+
+        # Fishing rewards and tank sales are non-distributed, but every pond
+        # relies on this authority (including the estate pond).
+        self.fishManager = FishManagerAI(self)
+
+        # Fish Bingo owns only the event lifecycle; ordinary fishing remains
+        # available independently through FishManagerAI.
+        self.bingoManager = FishBingoManagerAI(self)
 
         # Create our suit invasion manager...
         self.suitInvasionManager = SuitInvasionManagerAI(self)
@@ -227,6 +242,10 @@ class ToontownAIRepository(ToontownInternalRepository):
         # Generate our Tutorial manager...
         self.tutorialManager = TutorialManagerAI(self)
         self.tutorialManager.generateWithRequired(OTP_ZONE_ID_MANAGEMENT)
+
+        # Generate the estate manager before clients request their estate zone.
+        self.estateMgr = EstateManagerAI(self)
+        self.estateMgr.generateWithRequired(OTP_ZONE_ID_MANAGEMENT)
 
         # Generate our party manager...
         self.partyManager = DistributedPartyManagerAI(self)
@@ -341,6 +360,10 @@ class ToontownAIRepository(ToontownInternalRepository):
         for suitPlanner in list(self.suitPlanners.values()):
             suitPlanner.assignInitialSuitBuildings()
 
+        # All static ponds now exist, so the schedule can generate a manager
+        # for every pond if the current Toontown-Time window is active.
+        self.bingoManager.start()
+
     def genDNAFileName(self, zoneId):
         canonicalZoneId = ZoneUtil.getCanonicalZoneId(zoneId)
         canonicalHoodId = ZoneUtil.getCanonicalHoodId(canonicalZoneId)
@@ -388,6 +411,7 @@ class ToontownAIRepository(ToontownInternalRepository):
             pond = DistributedFishingPondAI(self)
             pond.setArea(area)
             pond.generateWithRequired(zoneId)
+            pond.generateTargets()
             fishingPonds.append(pond)
         else:
             if isinstance(dnaData, DNAVisGroup):
@@ -403,7 +427,22 @@ class ToontownAIRepository(ToontownInternalRepository):
         return fishingPonds, fishingPondGroups
 
     def findFishingSpots(self, dnaData, pond):
-        return []  # TODO
+        fishingSpots = []
+        for index in range(dnaData.getNumChildren()):
+            group = dnaData.at(index)
+            if (not isinstance(group, DNAProp) or
+                    'fishing_spot' not in group.getCode()):
+                continue
+            position = group.getPos()
+            hpr = group.getHpr()
+            spot = DistributedFishingSpotAI(self)
+            spot.setPondDoId(pond.doId)
+            spot.setPosHpr(
+                position[0], position[1], position[2],
+                hpr[0], hpr[1], hpr[2])
+            spot.generateWithRequired(pond.zoneId)
+            fishingSpots.append(spot)
+        return fishingSpots
 
     def findPartyHats(self, dnaData, zoneId):
         return []  # TODO

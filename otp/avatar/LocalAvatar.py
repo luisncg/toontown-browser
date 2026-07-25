@@ -19,6 +19,11 @@ from direct.controls.ObserverWalker import ObserverWalker
 from direct.controls.SwimWalker import SwimWalker
 from direct.controls.TwoDWalker import TwoDWalker
 
+try:
+    import browser_storage
+except ImportError:
+    browser_storage = None
+
 class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.DistributedSmoothNode):
     notify = DirectNotifyGlobal.directNotify.newCategory('LocalAvatar')
     wantDevCameraPositions = ConfigVariableBool('want-dev-camera-positions', 0).value
@@ -28,6 +33,27 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
     __enableMarkerPlacement = ConfigVariableBool('place-markers', 0).value
     acceptingNewFriends = ConfigVariableBool('accepting-new-friends', 1).value
     acceptingNonFriendWhispers = ConfigVariableBool('accepting-non-friend-whispers', 0).value
+    sprintCameraFovBoost = ConfigVariableDouble(
+        'avatar-sprint-camera-fov-boost', 6.0).value
+    sprintCameraFovInTime = ConfigVariableDouble(
+        'avatar-sprint-camera-fov-in-time', 0.18).value
+    sprintCameraFovOutTime = ConfigVariableDouble(
+        'avatar-sprint-camera-fov-out-time', 0.24).value
+    experimentalMouseLookSensitivity = ConfigVariableDouble(
+        'experimental-mouse-look-sensitivity', 0.16).value
+    ExperimentalMouseLookSetting = 'experimental-mouse-look'
+    ExperimentalMouseLookAvailableKey = (
+        'open-toontown.experimental-mouse-look-available'
+    )
+    ExperimentalMouseLookHeadingKey = (
+        'open-toontown.experimental-mouse-look-heading'
+    )
+    ExperimentalMouseLookSmokeKey = (
+        'open-toontown.experimental-mouse-look-smoke'
+    )
+    ExperimentalMouseLookRegionKey = (
+        'open-toontown.experimental-mouse-look-region'
+    )
 
     def __init__(self, cr, chatMgr, talkAssistant = None, passMessagesThrough = False):
         try:
@@ -43,6 +69,11 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         base.pushCTrav(self.cTrav)
         self.cTrav.setRespectPrevTransform(1)
         self.avatarControlsEnabled = 0
+        self.experimentalMouseLookEnabled = bool(
+            base.settings.getSetting(self.ExperimentalMouseLookSetting, False)
+        )
+        self.experimentalMouseLookLastX = None
+        self.experimentalMouseLookLastY = None
         self.controlManager = ControlManager.ControlManager(True, passMessagesThrough)
         self.initializeCollisions()
         self.initializeSmartCamera()
@@ -75,6 +106,7 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.accept('wakeup', self.wakeUp)
         self.jumpLandAnimFixTask = None
         self.fov = OTPGlobals.DefaultCameraFov
+        self.sprintCameraActive = False
         self.accept('avatarMoving', self.clearPageUpDown)
         self.nametag2dNormalContents = Nametag.CSpeech
         self.showNametag2d()
@@ -84,15 +116,19 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
 
     def useSwimControls(self):
         self.controlManager.use('swim', self)
+        self.refreshExperimentalMouseLook()
 
     def useGhostControls(self):
         self.controlManager.use('ghost', self)
+        self.refreshExperimentalMouseLook()
 
     def useWalkControls(self):
         self.controlManager.use('walk', self)
+        self.refreshExperimentalMouseLook()
 
     def useTwoDControls(self):
         self.controlManager.use('twoD', self)
+        self.refreshExperimentalMouseLook()
 
     def isLockedDown(self):
         return self.lockedDown
@@ -129,6 +165,7 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
             self.LocalAvatar_deleted = 1
 
         self.ignoreAll()
+        self.stopExperimentalMouseLook()
         self.stopJumpLandTask()
         taskMgr.remove('shadowReach')
         base.popCTrav()
@@ -415,11 +452,17 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.avatarControlsEnabled = 1
         self.setupAnimationEvents()
         self.controlManager.enable()
+        self.refreshExperimentalMouseLook()
 
     def disableAvatarControls(self):
+        self.setSprintCameraActive(False, immediate=True)
+        freeCamera = getattr(self, 'freeCamera', None)
+        if freeCamera is not None and freeCamera.active:
+            freeCamera.exit()
         if not self.avatarControlsEnabled:
             return
         self.avatarControlsEnabled = 0
+        self.refreshExperimentalMouseLook()
         self.ignoreAnimationEvents()
         self.controlManager.disable()
         self.clearPageUpDown()
@@ -429,6 +472,154 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
 
     def setWalkSpeedSlow(self):
         self.controlManager.setSpeeds(OTPGlobals.ToonForwardSlowSpeed, OTPGlobals.ToonJumpSlowForce, OTPGlobals.ToonReverseSlowSpeed, OTPGlobals.ToonRotateSlowSpeed)
+
+    def setExperimentalMouseLookEnabled(self, enabled):
+        self.experimentalMouseLookEnabled = bool(enabled)
+        self.refreshExperimentalMouseLook()
+
+    def isExperimentalMouseLookAvailable(self):
+        freeCamera = getattr(self, 'freeCamera', None)
+        if freeCamera is not None and freeCamera.active:
+            return True
+        return bool(
+            self.experimentalMouseLookEnabled
+            and self.avatarControlsEnabled
+            and self.controlManager.currentControlsName == 'walk'
+        )
+
+    def setExperimentalMouseLookAvailability(self, available):
+        if browser_storage is None:
+            return
+        try:
+            browser_storage.set_item(
+                self.ExperimentalMouseLookAvailableKey,
+                '1' if available else '0',
+            )
+        except RuntimeError:
+            pass
+
+    def refreshExperimentalMouseLook(self):
+        available = self.isExperimentalMouseLookAvailable()
+        self.setExperimentalMouseLookAvailability(available)
+        taskName = self.taskName('experimentalMouseLook')
+        taskMgr.remove(taskName)
+        self.experimentalMouseLookLastX = None
+        self.experimentalMouseLookLastY = None
+        if available:
+            taskMgr.add(self.updateExperimentalMouseLook, taskName, 24)
+        else:
+            self.releaseExperimentalMouseLookPointer()
+
+    def stopExperimentalMouseLook(self):
+        taskMgr.remove(self.taskName('experimentalMouseLook'))
+        self.experimentalMouseLookLastX = None
+        self.experimentalMouseLookLastY = None
+        self.setExperimentalMouseLookAvailability(False)
+        self.releaseExperimentalMouseLookPointer()
+
+    def releaseExperimentalMouseLookPointer(self):
+        if (
+            browser_storage is not None
+            and hasattr(browser_storage, 'exit_pointer_lock')
+        ):
+            browser_storage.exit_pointer_lock()
+        properties = base.win.getProperties()
+        if properties.getMouseMode() != WindowProperties.M_relative:
+            return
+        requested = WindowProperties()
+        requested.setMouseMode(WindowProperties.M_absolute)
+        base.win.requestProperties(requested)
+
+    def isExperimentalMouseLookPointerLocked(self):
+        if (
+            browser_storage is not None
+            and hasattr(browser_storage, 'is_pointer_locked')
+        ):
+            return bool(browser_storage.is_pointer_locked())
+        return (
+            base.win.getProperties().getMouseMode()
+            == WindowProperties.M_relative
+        )
+
+    def isExperimentalMouseLookCaptureAllowed(self):
+        if not self.isExperimentalMouseLookAvailable():
+            return False
+        if self.isExperimentalMouseLookPointerLocked():
+            return True
+        mouseWatcher = base.mouseWatcherNode
+        if mouseWatcher is None or not mouseWatcher.hasMouse():
+            return True
+        region = mouseWatcher.getOverRegion()
+        if region is None:
+            return True
+        if browser_storage is not None:
+            try:
+                if browser_storage.get_item(
+                    self.ExperimentalMouseLookSmokeKey
+                ) == '1':
+                    browser_storage.set_item(
+                        self.ExperimentalMouseLookRegionKey,
+                        '%s|%s|flags=%s|sort=%s|area=%s|frame=%s' % (
+                            region.getName(),
+                            region.getType().getName(),
+                            region.getSuppressFlags(),
+                            region.getSort(),
+                            region.getArea(),
+                            region.getFrame(),
+                        ),
+                    )
+            except (AttributeError, RuntimeError):
+                pass
+        return not (
+            region.getSuppressFlags()
+            & MouseWatcherRegion.SFMouseButton
+        )
+
+    def updateExperimentalMouseLook(self, task):
+        if not self.isExperimentalMouseLookAvailable():
+            self.stopExperimentalMouseLook()
+            return Task.done
+        if not self.isExperimentalMouseLookPointerLocked():
+            self.experimentalMouseLookLastX = None
+            self.experimentalMouseLookLastY = None
+            return Task.cont
+        pointer = base.win.getPointer(0)
+        pointerX = pointer.getX()
+        pointerY = pointer.getY()
+        if self.experimentalMouseLookLastX is None:
+            self.experimentalMouseLookLastX = pointerX
+            self.experimentalMouseLookLastY = pointerY
+            return Task.cont
+        deltaX = pointerX - self.experimentalMouseLookLastX
+        deltaY = pointerY - self.experimentalMouseLookLastY
+        self.experimentalMouseLookLastX = pointerX
+        self.experimentalMouseLookLastY = pointerY
+        if deltaX or deltaY:
+            self.applyExperimentalMouseLookDelta(deltaX, deltaY)
+            if browser_storage is not None:
+                try:
+                    if browser_storage.get_item(
+                        self.ExperimentalMouseLookSmokeKey
+                    ) == '1':
+                        browser_storage.set_item(
+                            self.ExperimentalMouseLookHeadingKey,
+                            str(self.getH()),
+                        )
+                except RuntimeError:
+                    pass
+        return Task.cont
+
+    def applyExperimentalMouseLookDelta(self, deltaX, deltaY=0):
+        freeCamera = getattr(self, 'freeCamera', None)
+        if freeCamera is not None and freeCamera.active:
+            freeCamera.applyMouseDelta(deltaX, deltaY)
+            return
+        if not deltaX:
+            return
+        self.setH(
+            self.getH() - deltaX * self.experimentalMouseLookSensitivity
+        )
+        messenger.send('avatarMoving')
 
     def pageUp(self):
         if not self.avatarControlsEnabled:
@@ -456,7 +647,7 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
 
     def clearPageUpDown(self):
         if self.isPageDown or self.isPageUp:
-            self.lerpCameraFov(self.fov, 0.6)
+            self.lerpCameraFov(self.getMovementCameraFov(), 0.6)
             self.isPageDown = 0
             self.isPageUp = 0
             self.setCameraPositionByIndex(self.cameraIndex)
@@ -846,10 +1037,33 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
             self.camLerpInterval = LerpFunctionInterval(setCamFov, fromData=oldFov, toData=fov, duration=time, name='cam-fov-lerp')
             self.camLerpInterval.start()
 
+    def getMovementCameraFov(self):
+        if self.sprintCameraActive:
+            return self.fov + self.sprintCameraFovBoost
+        return self.fov
+
+    def setSprintCameraActive(self, active, immediate=False):
+        active = bool(active)
+        if active == self.sprintCameraActive:
+            return
+        self.sprintCameraActive = active
+        if self.isPageDown or self.isPageUp:
+            return
+        targetFov = self.getMovementCameraFov()
+        if immediate:
+            taskMgr.remove('cam-fov-lerp-play')
+            base.camLens.setFov(targetFov)
+        else:
+            duration = (
+                self.sprintCameraFovInTime if active
+                else self.sprintCameraFovOutTime
+            )
+            self.lerpCameraFov(targetFov, duration)
+
     def setCameraFov(self, fov):
         self.fov = fov
         if not (self.isPageDown or self.isPageUp):
-            base.camLens.setFov(self.fov)
+            base.camLens.setFov(self.getMovementCameraFov())
 
     def gotoNode(self, node, eyeHeight = 3):
         possiblePoints = (Point3(3, 6, 0),
@@ -931,24 +1145,17 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         return self.animMultiplier
 
     def enableRun(self):
-        self.accept('arrow_up', self.startRunWatch)
-        self.accept('arrow_up-up', self.stopRunWatch)
-        self.accept('control-arrow_up', self.startRunWatch)
-        self.accept('control-arrow_up-up', self.stopRunWatch)
-        self.accept('alt-arrow_up', self.startRunWatch)
-        self.accept('alt-arrow_up-up', self.stopRunWatch)
-        self.accept('shift-arrow_up', self.startRunWatch)
-        self.accept('shift-arrow_up-up', self.stopRunWatch)
+        self.accept('InputState-forward', self.__handleForwardState)
 
     def disableRun(self):
-        self.ignore('arrow_up')
-        self.ignore('arrow_up-up')
-        self.ignore('control-arrow_up')
-        self.ignore('control-arrow_up-up')
-        self.ignore('alt-arrow_up')
-        self.ignore('alt-arrow_up-up')
-        self.ignore('shift-arrow_up')
-        self.ignore('shift-arrow_up-up')
+        self.ignore('InputState-forward')
+        self.stopRunWatch()
+
+    def __handleForwardState(self, isActive):
+        if isActive:
+            self.startRunWatch()
+        else:
+            self.stopRunWatch()
 
     def startRunWatch(self):
 
@@ -1041,6 +1248,12 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
 
     def trackAnimToSpeed(self, task):
         speed, rotSpeed, slideSpeed = self.controlManager.getSpeeds()
+        self.setSprintCameraActive(
+            self.avatarControlsEnabled
+            and self.controlManager.currentControlsName == 'walk'
+            and inputState.isSet('sprint')
+            and speed > OTPGlobals.ToonForwardSpeed
+        )
         if speed != 0.0 or rotSpeed != 0.0 or inputState.isSet('jump'):
             if not self.movingFlag:
                 self.movingFlag = 1

@@ -55,6 +55,7 @@ dclass Account {
 
 dclass AstronAccount {
   uint32[] ACCOUNT_AV_SET required db;
+  uint32[] HOUSE_ID_SET db;
   uint32 ESTATE_ID db;
   AvatarPendingDel ACCOUNT_AV_SET_DEL[] db;
   string CREATED db;
@@ -523,7 +524,8 @@ struct PotentialAvatar {
 };
 
 dclass AstronLoginManager : DistributedObject {
-  requestLogin(string) clsend;
+  requestLogin(string, string) clsend;
+  requestCreateAccount(string, string) clsend;
   loginResponse(blob);
   requestAvatarList() clsend;
   avatarListResponse(PotentialAvatar[]);

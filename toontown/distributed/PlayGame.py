@@ -426,11 +426,18 @@ class PlayGame(StateData.StateData):
          'loader': 'safeZoneLoader',
          'how': 'teleportIn',
          'shardId': None}
+        estateMgr = getattr(base.cr, 'estateMgr', None)
+        if estateMgr is None or estateMgr.isDisabled():
+            self.notify.warning('EstateManager is unavailable; returning to the playground.')
+            self.doneStatus['estateUnavailable'] = 1
+            self.goHomeFailed(None)
+            return
+
         self.acceptOnce('setLocalEstateZone', self.goHome)
         if avId > 0:
-            base.cr.estateMgr.getLocalEstateZone(avId)
+            estateMgr.getLocalEstateZone(avId)
         else:
-            base.cr.estateMgr.getLocalEstateZone(base.localAvatar.getDoId())
+            estateMgr.getLocalEstateZone(base.localAvatar.getDoId())
         return
 
     def goHome(self, ownerId, zoneId):
@@ -455,7 +462,9 @@ class PlayGame(StateData.StateData):
     def goHomeFailed(self, task):
         self.notify.debug('goHomeFailed')
         failedToVisitAvId = self.doneStatus.get('avId')
-        if failedToVisitAvId > 0:
+        if self.doneStatus.get('estateUnavailable'):
+            message = TTLocalizer.EstateUnavailable
+        elif failedToVisitAvId > 0:
             message = TTLocalizer.EstateTeleportFailedNotFriends % base.cr.identifyAvatar(failedToVisitAvId).getName()
         else:
             message = TTLocalizer.EstateTeleportFailed

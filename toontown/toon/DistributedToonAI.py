@@ -28,6 +28,7 @@ from .NPCToons import npcFriends, isZoneProtected
 from toontown.coghq import CogDisguiseGlobals
 import random
 import re
+import os
 from toontown.chat import ResistanceChat
 from toontown.racing import RaceGlobals
 from toontown.hood import ZoneUtil
@@ -35,6 +36,7 @@ from toontown.toon import NPCToons
 from toontown.estate import FlowerCollection
 from toontown.estate import FlowerBasket
 from toontown.estate import GardenGlobals
+from toontown.estate.EstateTransactionAI import AstronObjectTransaction
 from toontown.golf import GolfGlobals
 from toontown.parties import PartyGlobals
 from toontown.parties.PartyInfo import PartyInfoAI
@@ -45,6 +47,12 @@ from toontown.toonbase import ToontownAccessAI
 from toontown.toonbase import TTLocalizer
 from toontown.catalog import CatalogAccessoryItem
 from toontown.minigame import MinigameCreatorAI
+from toontown.battle.ReactiveGagGlobals import (
+    MAX_REACTIVE_GAG_COUNT,
+    clampReactiveGagCount,
+    getReactiveTrackIndex,
+    isImplementedReactiveGag,
+)
 from functools import reduce
 if simbase.wantPets:
     from toontown.pets import PetLookerAI, PetObserve
@@ -78,6 +86,8 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         self.air = air
         self.dna = ToonDNA.ToonDNA()
         self.inventory = None
+        self.reactiveGagCounts = [MAX_REACTIVE_GAG_COUNT,
+                                  MAX_REACTIVE_GAG_COUNT]
         self.fishCollection = None
         self.fishTank = None
         self.experience = None
@@ -146,6 +156,8 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
          0,
          0,
          0]
+        # The animation-only 67 emotion is available to every Toon.
+        self.emoteAccess.append(1)
         self.maxBankMoney = ToontownGlobals.DefaultMaxBankMoney
         self.gardenSpecials = []
         self.houseId = 0
@@ -176,6 +188,7 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         self.onOrder = CatalogItemList.CatalogItemList(store=CatalogItem.Customization | CatalogItem.DeliveryDate)
         self.onGiftOrder = CatalogItemList.CatalogItemList(store=CatalogItem.Customization | CatalogItem.DeliveryDate)
         self.mailboxContents = CatalogItemList.CatalogItemList(store=CatalogItem.Customization)
+        self.estateTransactionJournal = b''
         self.awardMailboxContents = CatalogItemList.CatalogItemList(store=CatalogItem.Customization)
         self.onAwardOrder = CatalogItemList.CatalogItemList(store=CatalogItem.Customization | CatalogItem.DeliveryDate)
         self.kart = None
@@ -567,6 +580,58 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
 
     def getInventory(self):
         return self.inventory.makeNetString()
+
+    def b_setReactiveGagCounts(self, decoyCount, embarrassCount):
+        self.setReactiveGagCounts(decoyCount, embarrassCount)
+        self.d_setReactiveGagCounts(*self.getReactiveGagCounts())
+
+    def d_setReactiveGagCounts(self, decoyCount, embarrassCount):
+        self.sendUpdate('setReactiveGagCounts', [decoyCount, embarrassCount])
+
+    def setReactiveGagCounts(self, decoyCount, embarrassCount):
+        self.reactiveGagCounts = [
+            clampReactiveGagCount(decoyCount),
+            clampReactiveGagCount(embarrassCount),
+        ]
+
+    def getReactiveGagCounts(self):
+        return tuple(self.reactiveGagCounts)
+
+    def getReactiveGagCount(self, track):
+        index = getReactiveTrackIndex(track)
+        if index < 0:
+            return 0
+        return self.reactiveGagCounts[index]
+
+    def hasReactiveGag(self, track, level):
+        return (isImplementedReactiveGag(track, level)
+                and self.getReactiveGagCount(track) > 0)
+
+    def useReactiveGag(self, track, level):
+        if not self.hasReactiveGag(track, level):
+            return False
+        counts = list(self.reactiveGagCounts)
+        counts[getReactiveTrackIndex(track)] -= 1
+        self.b_setReactiveGagCounts(*counts)
+        return True
+
+    def requestReactiveGagRefill(self, track):
+        senderId = self.air.getAvatarIdFromSender()
+        index = getReactiveTrackIndex(track)
+        if senderId != self.doId or index < 0:
+            self.air.writeServerEvent(
+                'suspicious', self.doId,
+                'invalid reactive gag refill sender=%s track=%s' % (
+                    senderId, track))
+            return
+        if os.environ.get('TOONTOWN_PRODUCTION') == '1':
+            self.air.writeServerEvent(
+                'suspicious', self.doId,
+                'reactive gag testing refill rejected in production')
+            return
+        counts = list(self.reactiveGagCounts)
+        counts[index] = MAX_REACTIVE_GAG_COUNT
+        self.b_setReactiveGagCounts(*counts)
 
     def doRestock(self, noUber = 1, noPaid = 1):
         self.inventory.zeroInv()
@@ -2049,23 +2114,26 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
 
     def b_setEmoteAccess(self, bits):
         self.setEmoteAccess(bits)
-        self.d_setEmoteAccess(bits)
+        self.d_setEmoteAccess(self.emoteAccess)
 
     def d_setEmoteAccess(self, bits):
         self.sendUpdate('setEmoteAccess', [bits])
 
     def setEmoteAccess(self, bits):
+        bits = list(bits)
+        needsPersist = len(bits) != len(self.emoteAccess)
         if len(bits) == 20:
-            bits.extend([0,
-             0,
-             0,
-             0,
-             0])
-            self.b_setEmoteAccess(bits)
-        elif len(bits) != len(self.emoteAccess):
+            bits.extend([0, 0, 0, 0, 0])
+        if len(bits) == 25:
+            bits.append(1)
+        if len(bits) != len(self.emoteAccess):
             self.notify.warning('New emote access list must be the same size as the old one.')
             return
+        needsPersist = needsPersist or not bits[25]
+        bits[25] = 1
         self.emoteAccess = bits
+        if needsPersist:
+            self.d_setEmoteAccess(bits)
 
     def getEmoteAccess(self):
         return self.emoteAccess
@@ -2333,9 +2401,53 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         now = int(time.time() / 60 + 0.5)
         delivered, remaining = self.onOrder.extractDeliveryItems(now)
         self.notify.info('Delivery for %s: %s.' % (self.doId, delivered))
-        self.b_setMailboxContents(self.mailboxContents + delivered)
-        self.b_setDeliverySchedule(remaining)
-        self.b_setCatalogNotify(self.catalogNotify, ToontownGlobals.NewItems)
+        if not len(delivered):
+            self.b_setDeliverySchedule(remaining)
+            return Task.done
+
+        oldMailbox = self.getMailboxContents()
+        oldSchedule = self.getDeliverySchedule()
+        newMailbox = self.mailboxContents + delivered
+        newMailboxBlob = newMailbox.getBlob(
+            store=CatalogItem.Customization)
+        newScheduleBlob = remaining.getBlob(
+            store=CatalogItem.Customization | CatalogItem.DeliveryDate)
+        transaction = AstronObjectTransaction(
+            self.air, self.doId,
+            self.air.dclassesByName['DistributedToonAI'])
+
+        def committed(success, conflicts):
+            if not success:
+                if conflicts:
+                    if 'setMailboxContents' in conflicts:
+                        self.setMailboxContents(
+                            conflicts['setMailboxContents'])
+                        self.d_setMailboxContents(self.mailboxContents)
+                    if 'setDeliverySchedule' in conflicts:
+                        self.setDeliverySchedule(
+                            conflicts['setDeliverySchedule'])
+                        self.d_setDeliverySchedule(self.onOrder)
+                self.notify.warning(
+                    'Delivery CAS conflicted for avatar %s; authoritative '
+                    'schedule was reloaded' % self.doId)
+                return
+            self.setMailboxContents(newMailbox)
+            self.d_setMailboxContents(newMailbox)
+            self.setDeliverySchedule(remaining)
+            self.d_setDeliverySchedule(remaining)
+            self.b_setCatalogNotify(
+                self.catalogNotify, ToontownGlobals.NewItems)
+
+        transaction.commit(
+            {
+                'setMailboxContents': oldMailbox,
+                'setDeliverySchedule': oldSchedule,
+            },
+            {
+                'setMailboxContents': newMailboxBlob,
+                'setDeliverySchedule': newScheduleBlob,
+            },
+            committed)
         return Task.done
 
     def b_setMailboxContents(self, mailboxContents):
@@ -2362,6 +2474,12 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
 
     def getMailboxContents(self):
         return self.mailboxContents.getBlob(store=CatalogItem.Customization)
+
+    def setEstateTransactionJournal(self, journal):
+        self.estateTransactionJournal = journal
+
+    def getEstateTransactionJournal(self):
+        return self.estateTransactionJournal
 
     def b_setGhostMode(self, flag):
         self.setGhostMode(flag)
@@ -3054,6 +3172,12 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
             pet = simbase.air.doId2do.get(petId)
             if pet is not None:
                 if pet.__class__.__name__ == 'DistributedPetAI':
+                    if getattr(pet, 'zoneId', 0) != self.zoneId:
+                        self.air.writeServerEvent(
+                            'suspicious', self.doId,
+                            'setPetMovie: pet %s is outside Toon zone %s' %
+                            (petId, self.zoneId))
+                        return
                     pet.handleAvPetInteraction(flag, self.getDoId())
                 else:
                     self.air.writeServerEvent('suspicious', self.doId, 'setPetMovie: playing pet movie %s on non-pet object %s' % (flag, petId))

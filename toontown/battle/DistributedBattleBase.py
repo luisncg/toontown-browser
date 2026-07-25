@@ -40,6 +40,7 @@ from toontown.battle.BattleBase import (
 
 from toontown.battle.BattleProps import globalPropPool
 from toontown.battle.Movie import Movie
+from toontown.battle.ReactiveGagGlobals import DECOY_TRACK, EMBARRASS_TRACK, isReactiveTrack
 from toontown.distributed.DelayDelete import DelayDelete, cleanupDelayDeletes
 from toontown.hood import ZoneUtil
 from toontown.suit.Suit import Suit
@@ -628,6 +629,8 @@ class DistributedBattleBase(DistributedNode, BattleBase):
             elif track == PASS:
                 targetIndex = -1
                 tracks[i] = PASS_ATTACK
+            elif track == DECOY_TRACK:
+                targetIndex = -2
             elif attackAffectsGroup(track, level):
                 targetIndex = -1
             elif track == HEAL:
@@ -1140,13 +1143,20 @@ class DistributedBattleBase(DistributedNode, BattleBase):
     def __handleLocalToonBattleEvent(self, response):
         mode = response['mode']
         noAttack = 0
-        if mode == 'Attack':
+        if mode == 'Attack' or mode == 'Reactive':
             self.notify.debug('got an attack')
             track = response['track']
             level = response['level']
             target = response['target']
             targetId = target
-            if track == HEAL and not levelAffectsGroup(HEAL, level):
+            if track == DECOY_TRACK:
+                targetId = base.localAvatar.doId
+            elif track == EMBARRASS_TRACK:
+                if target >= 0 and target < len(self.activeSuits):
+                    targetId = self.activeSuits[target].doId
+                else:
+                    targetId = -1
+            elif track == HEAL and not levelAffectsGroup(HEAL, level):
                 if target >= 0 and target < len(self.activeToons):
                     targetId = self.activeToons[target].doId
                 else:
@@ -1164,7 +1174,7 @@ class DistributedBattleBase(DistributedNode, BattleBase):
                 else:
                     target = -1
 
-            if len(self.luredSuits) > 0:
+            if not isReactiveTrack(track) and len(self.luredSuits) > 0:
                 if track == TRAP or track == LURE and not levelAffectsGroup(LURE, level):
                     if target != -1:
                         suit = self.findSuit(targetId)

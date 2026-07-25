@@ -29,8 +29,52 @@ class DistributedHouseDoor(DistributedDoor.DistributedDoor):
     def getTriggerName(self):
         return 'door_trigger_' + str(self.houseId)
 
+    def setTriggerName(self):
+        # Exterior house triggers are renamed by DistributedHouse after its
+        # model loads.  The interior model only has a generic door_trigger,
+        # so bind it to this distributed house door here.
+        if self.doorType == DoorTypes.INT_STANDARD:
+            doorTrigger = render.find('**/door_trigger*')
+            if not doorTrigger.isEmpty():
+                doorTrigger.node().setName(self.getTriggerName())
+            else:
+                self.notify.warning(
+                    'Unable to find interior trigger for house %s' % self.houseId
+                )
+        else:
+            DistributedDoor.DistributedDoor.setTriggerName(self)
+
     def hideDoorParts(self):
         pass
+
+    def wantsNametag(self):
+        return False
+
+    def readyToExit(self):
+        self.notify.info(
+            'House door %s readyToExit in zone %s' % (self.doId, self.zoneId))
+        DistributedDoor.DistributedDoor.readyToExit(self)
+
+    def avatarExit(self, avatarID):
+        self.notify.info(
+            'House door %s avatarExit %s' % (self.doId, avatarID))
+        DistributedDoor.DistributedDoor.avatarExit(self, avatarID)
+
+    def exitDoorEnterOpen(self, ts):
+        self.notify.info(
+            'House door %s exitDoorEnterOpen (%s queued)' %
+            (self.doId, len(self.avatarExitIDList)))
+        DistributedDoor.DistributedDoor.exitDoorEnterOpen(self, ts)
+
+    def exitCompleted(self):
+        self.notify.info('House door %s exitCompleted' % self.doId)
+        DistributedDoor.DistributedDoor.exitCompleted(self)
+
+    def doorTrigger(self, args=None):
+        self.notify.info(
+            'House door %s collision trigger (%s)' %
+            (self.doId, 'direct' if args is None else 'surface'))
+        DistributedDoor.DistributedDoor.doorTrigger(self, args)
 
     def announceGenerate(self):
         DistributedObject.DistributedObject.announceGenerate(self)

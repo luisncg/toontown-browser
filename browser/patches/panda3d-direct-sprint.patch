@@ -1,0 +1,56 @@
+diff --git a/direct/src/controls/ControlManager.py b/direct/src/controls/ControlManager.py
+index 76c6177d6..9fca751c2 100755
+--- a/direct/src/controls/ControlManager.py
++++ b/direct/src/controls/ControlManager.py
+@@ -29,6 +29,7 @@ class ControlManager:
+         'turnLeft': ConfigVariableString('keybind-turn-left', 'arrow_left'),
+         'turnRight': ConfigVariableString('keybind-turn-right', 'arrow_right'),
+         'jump': ConfigVariableString('keybind-jump', 'space'),
++        'sprint': ConfigVariableString('keybind-sprint', 'shift'),
+     }
+     keybindInputSource = 'CustomKeybind'
+ 
+@@ -274,4 +275,5 @@ class ControlManager:
+         ist.append(self._watchKeybind("jump"))
++        ist.append(self._watchKeybind("sprint"))
+ 
+         if self.currentControls:
+             self.currentControls.enableAvatarControls()
+diff --git a/direct/src/controls/GravityWalker.py b/direct/src/controls/GravityWalker.py
+index f32ade2fd..c954f2591 100644
+--- a/direct/src/controls/GravityWalker.py
++++ b/direct/src/controls/GravityWalker.py
+@@ -30,6 +30,7 @@ from panda3d.core import (
+     CollisionSphere,
+     CollisionTraverser,
+     ConfigVariableBool,
++    ConfigVariableDouble,
+     Mat3,
+     Point3,
+     Vec3,
+@@ -42,6 +43,7 @@ class GravityWalker(DirectObject.DirectObject):
+     wantDebugIndicator = ConfigVariableBool('want-avatar-physics-indicator', False)
+     wantFloorSphere = ConfigVariableBool('want-floor-sphere', False)
+     earlyEventSphere = ConfigVariableBool('early-event-sphere', False)
++    sprintMultiplier = ConfigVariableDouble('avatar-sprint-multiplier', 1.5)
+ 
+     DiagonalFactor = math.sqrt(2.) / 2.
+ 
+@@ -421,7 +423,7 @@ class GravityWalker(DirectObject.DirectObject):
+         Check on the arrow keys and update the avatar.
+         """
+         # get the button states:
+-        run = inputState.isSet("run")
++        sprint = inputState.isSet("sprint")
+         forward = inputState.isSet("forward")
+         reverse = inputState.isSet("reverse")
+         turnLeft = inputState.isSet("turnLeft")
+@@ -441,6 +443,8 @@ class GravityWalker(DirectObject.DirectObject):
+         # Determine what the speeds are based on the buttons:
+         self.speed=(forward and self.avatarControlForwardSpeed or
+                     reverse and -self.avatarControlReverseSpeed)
++        if sprint and self.speed > 0.0:
++            self.speed *= self.sprintMultiplier.value
+         # Slide speed is a scaled down version of forward speed
+         # Note: you can multiply a factor in here if you want slide to
+         # be slower than normal walk/run. Let's try full speed.

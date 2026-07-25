@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
+    <meta name="description" content="Play Toontown directly in your web browser">
+    <link rel="canonical" href="https://toontown.lui.ss/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Toontown Browser">
+    <meta property="og:title" content="Toontown Browser">
+    <meta property="og:description" content="Play Toontown directly in your web browser">
+    <meta property="og:url" content="https://toontown.lui.ss/">
+    <meta property="og:image" content="https://toontown.lui.ss/toontownbrowserogimage2.png">
+    <meta property="og:image:secure_url" content="https://toontown.lui.ss/toontownbrowserogimage2.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1280">
+    <meta property="og:image:height" content="720">
+    <meta property="og:image:alt" content="Toontown Browser">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Toontown Browser">
+    <meta name="twitter:description" content="Play Toontown directly in your web browser">
+    <meta name="twitter:image" content="https://toontown.lui.ss/toontownbrowserogimage2.png">
+    <meta name="twitter:image:alt" content="Toontown Browser">
+    <title>Toontown Browser</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23ffb52e'/%3E%3Cpath d='M17 16h30v9H37v25H27V25H17z' fill='%23071225'/%3E%3C/svg%3E">
+    <script src="welcome-gate.js"></script>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <h1>Toontown Browser</h1>
+      </header>
+
+      <section class="stage" aria-label="Toontown Browser game canvas">
+        <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+        <div class="stage-grid" aria-hidden="true"></div>
+        <div id="loading" class="loading">
+          <img class="boot-logo" src="resources/phase_3/maps/toontown-logo.png" alt="Disney's Toontown Online">
+          <div class="boot-progress">
+            <p id="status">LOADING TOONTOWN...</p>
+            <div class="progress"><span id="progress"></span></div>
+            <p id="transfer" class="transfer">Preparing game files</p>
+          </div>
+          <div id="browser-check" class="browser-check" hidden>
+            <div id="turnstile-widget"></div>
+            <p>Checking your browser before entering Toontown…</p>
+          </div>
+        </div>
+
+        <div id="mobile-form-proxy" class="mobile-form-proxy" data-mode="none" data-interactive="false" aria-hidden="true">
+          <input
+            id="mobile-account-name"
+            class="mobile-form-input"
+            data-mobile-form-field="username"
+            type="text"
+            aria-label="Account Name"
+            autocomplete="username"
+            autocapitalize="none"
+            autocorrect="off"
+            enterkeyhint="next"
+            maxlength="64"
+            spellcheck="false"
+          >
+          <input
+            id="mobile-account-password"
+            class="mobile-form-input"
+            data-mobile-form-field="password"
+            type="password"
+            aria-label="Password"
+            autocomplete="current-password"
+            autocapitalize="none"
+            autocorrect="off"
+            enterkeyhint="go"
+            maxlength="128"
+            spellcheck="false"
+          >
+          <input
+            id="mobile-account-password-confirm"
+            class="mobile-form-input"
+            data-mobile-form-field="confirmPassword"
+            type="password"
+            aria-label="Confirm Password"
+            autocomplete="new-password"
+            autocapitalize="none"
+            autocorrect="off"
+            enterkeyhint="go"
+            maxlength="128"
+            spellcheck="false"
+          >
+        </div>
+
+        <div id="mobile-controls" class="mobile-controls" aria-label="Touch controls">
+          <div class="mobile-utility-row" aria-label="Game shortcuts">
+            <button type="button" class="mobile-utility" data-mobile-action="viewGags">Gags</button>
+            <button type="button" class="mobile-utility" data-mobile-action="viewToonTasks">Tasks</button>
+            <button type="button" class="mobile-utility" data-mobile-action="viewStreetMap">Map</button>
+            <button type="button" class="mobile-utility" data-mobile-action="exitActivity">Book</button>
+            <button type="button" class="mobile-utility" data-mobile-action="switchPov">POV</button>
+          </div>
+
+          <div class="mobile-control-deck">
+            <div id="mobile-stick" class="mobile-stick" role="application" aria-label="Movement stick">
+              <span id="mobile-stick-knob" class="mobile-stick-knob" aria-hidden="true"></span>
+            </div>
+
+            <div class="mobile-action-cluster" aria-label="Toon actions">
+              <button type="button" class="mobile-action mobile-action-run" data-mobile-action="sprint" data-mobile-hold="true">Run</button>
+              <button type="button" class="mobile-action mobile-action-jump" data-mobile-action="jump">Jump</button>
+              <button type="button" class="mobile-action mobile-action-primary" data-mobile-action="performAction">Action</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <p class="keys">Click the canvas to focus and enable sound · Esc releases pointer lock</p>
+      </footer>
+    </main>
+
+    <div
+      id="welcome-overlay"
+      class="welcome-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="welcome-title"
+      aria-describedby="welcome-description welcome-disclaimer"
+      aria-hidden="true"
+    >
+      <article class="welcome-card">
+        <h2 id="welcome-title">Welcome to Toontown Browser.</h2>
+        <p id="welcome-description">
+          Before you enter, you should know that Toontown Browser is a fan-made
+          revival of Disney's Toontown Online, running entirely in a web browser.
+          Toontown Browser was created using publicly available downloads and
+          information made freely available to the general public.
+        </p>
+
+        <h3>Just One More Thing.</h3>
+        <p id="welcome-disclaimer">
+          By using Toontown Browser, you certify that you understand that
+          Toontown Browser is not affiliated with The Walt Disney Company and/or
+          Disney Interactive (collectively referred to as "Disney") and you
+          hereby release Disney, as well as any employees or agents of Disney,
+          from any and all liability, corporate, or personal loss caused to you
+          or others by the use of Toontown Browser.
+        </p>
+
+        <div class="welcome-actions">
+          <button id="welcome-accept" class="welcome-accept" type="button">
+            Sounds Good!
+          </button>
+          <a
+            id="welcome-leave"
+            class="welcome-leave"
+            href="https://games.disney.com/"
+            rel="noopener"
+          >I Want to Leave.</a>
+        </div>
+      </article>
+    </div>
+
+    <script src="secure-asset-cache.js"></script>
+    <script src="short-audio-banks.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

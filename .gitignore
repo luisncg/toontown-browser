@@ -12,6 +12,9 @@ whitelist/
 .idea
 venv/
 *.json
+!package.json
+!package-lock.json
+!browser/audio-banks.json
 !win32/.vscode/tasks.json
 !linux/.vscode/tasks.json
 !darwin/.vscode/tasks.json
@@ -20,3 +23,10 @@ venv/
 PPYTHON_PATH
 local/
 errorCode
+.env
+.env.*
+!.env.example
+.toolchain/
+.build-wasm/
+dist-web/
+node_modules/

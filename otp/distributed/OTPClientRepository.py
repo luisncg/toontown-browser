@@ -55,6 +55,9 @@ class OTPClientRepository(ClientRepositoryBase):
         self.launcher = launcher
         base.launcher = launcher
         self.__currentAvId = 0
+        # The browser may lose its gateway connection while the untouched login
+        # screen is still open, before LoginScreen has supplied an account name.
+        self.userName = ''
         self.productName = ConfigVariableString('product-name', 'DisneyOnline-US').value
         self.createAvatarClass = None
         self.systemMessageSfx = None
@@ -160,7 +163,7 @@ class OTPClientRepository(ClientRepositoryBase):
         if self.launcher and hasattr(self.launcher, 'http'):
             self.http = self.launcher.http
         else:
-            self.http = HTTPClient()
+            self.http = HTTPClient.getGlobalPtr() if sys.platform == 'emscripten' else HTTPClient()
 
         self.accountOldAuth = ConfigVariableBool('account-old-auth', 0).value
         self.accountOldAuth = ConfigVariableBool('%s-account-old-auth' % game.name,
@@ -326,6 +329,7 @@ class OTPClientRepository(ClientRepositoryBase):
             State('chooseAvatar',
                   self.enterChooseAvatar,
                   self.exitChooseAvatar, [
+                      'connect',
                       'noConnection',
                       'createAvatar',
                       'waitForAvatarList',
@@ -489,9 +493,31 @@ class OTPClientRepository(ClientRepositoryBase):
 
     def gotoFirstScreen(self):
         self.startReaderPollTask()
-        if not __astron__:
+        if __astron__ and hasattr(self.loginInterface, 'beginConnection'):
+            # Astron requires CLIENT_HELLO to be the first packet and starts its
+            # heartbeat timeout immediately afterward.  Complete that protocol
+            # handshake before the user submits credentials; account login is
+            # still deferred by LoginAstronAccount until they press Login.
+            self.loginInterface.beginConnection()
+        elif not __astron__:
             self.startHeartbeat()
         self.loginFSM.request('login')
+
+    def reconnectForAccountLogout(self):
+        """Return to login on a fresh anonymous Astron connection."""
+        self.notify.info('Logging out and reconnecting to the account screen.')
+        self.playToken = ''
+        self.password = ''
+        self.userName = ''
+        self.bootedIndex = None
+        self.bootedText = None
+        self.cleanupWaitingForDatabase()
+        self.resetInterestStateForConnectionLoss()
+        self.shardListHandle = None
+        self.uberZoneInterest = None
+        self.__currentAvId = 0
+        self.sendDisconnect()
+        self.loginFSM.request('connect', [self.serverList])
 
     @report(types=['args', 'deltaStamp'], dConfigParam='teleport')
     def enterLogin(self):
@@ -825,7 +851,8 @@ class OTPClientRepository(ClientRepositoryBase):
         self.__currentAvId = 0
         self.stopHeartbeat()
         self.stopReaderPollTask()
-        gameUsername = launcher.getValue('GAME_USERNAME', base.cr.userName)
+        gameUsername = launcher.getValue(
+            'GAME_USERNAME', getattr(base.cr, 'userName', ''))
         if self.bootedIndex != None and self.bootedIndex in OTPLocalizer.CRBootedReasons:
             message = OTPLocalizer.CRBootedReasons[self.bootedIndex] % {'name': gameUsername}
         elif self.bootedText != None:
@@ -1985,6 +2012,10 @@ class OTPClientRepository(ClientRepositoryBase):
                 return
             if msgType == CLIENT_EJECT:
                 self.handleGoGetLost(di)
+            elif msgType == CLIENT_HELLO_RESP and hasattr(self.loginInterface, 'handleHelloResp'):
+                # The initial Astron handshake now completes while the untouched
+                # login screen owns the repository's normal message handler.
+                self.loginInterface.handleHelloResp()
             elif msgType == CLIENT_HEARTBEAT:
                 self.handleServerHeartbeat(di)
             elif msgType == CLIENT_ENTER_OBJECT_REQUIRED:

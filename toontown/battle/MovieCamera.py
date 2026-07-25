@@ -129,6 +129,13 @@ def chooseLureCloseShot(lures, openDuration, openName, attackDuration):
     return track
 
 
+def chooseLureReactionShot(toon, suit, attackDuration):
+    """Hold the classic Lure group angle for a reactive gag movie."""
+    if attackDuration <= 0:
+        return Wait(0)
+    return allGroupLowShot(toon, attackDuration)
+
+
 def chooseSoundShot(sounds, targets, attackDuration, enterDuration = 0.0, exitDuration = 0.0):
     enterShot = chooseNPCEnterShot(sounds, enterDuration)
     openShot = chooseSoundOpenShot(sounds, targets, attackDuration)
@@ -272,6 +279,43 @@ def chooseSquirtCloseShot(squirts, suitSquirtsDict, openDuration, openName, atta
         notify.error('Bad number of suits: %s' % numSuits)
     track = random.choice(shotChoices)(*[av, duration])
     return track
+
+
+def chooseThrowSquirtReactionShot(toon, suit, attackDuration,
+                                  includeBehindToon=True):
+    """Use the classic Throw/Squirt shot pools for a reactive gag movie.
+
+    Throw and Squirt use the same five Toon-side opening shots and the same
+    four Cog-side closing shots.  Their normal gag movies always last at least
+    three seconds, while Fake Moustache can be shorter, so clamp the opening
+    shot instead of creating a negative-duration closing interval.  Decoy can
+    omit the rear Toon shot when the disguise itself must remain visible.
+    """
+    if attackDuration <= 0:
+        return Wait(0)
+
+    openDuration = min(3.0, attackDuration)
+    openShotChoices = [
+        avatarCloseUpThrowShot,
+        avatarCloseUpThreeQuarterRightShot,
+        allGroupLowShot,
+        suitGroupThreeQuarterLeftBehindShot,
+    ]
+    if includeBehindToon:
+        openShotChoices.insert(2, avatarBehindShot)
+    openShot = random.choice(openShotChoices)(toon, openDuration)
+    closeDuration = attackDuration - openDuration
+    if closeDuration <= 0:
+        return openShot
+
+    closeShotChoices = [
+        avatarCloseUpThrowShot,
+        avatarCloseUpThreeQuarterLeftShot,
+        allGroupLowShot,
+        suitGroupThreeQuarterLeftBehindShot,
+    ]
+    closeShot = random.choice(closeShotChoices)(suit, closeDuration)
+    return Sequence(openShot, closeShot, name='throwSquirtReactionShot')
 
 
 def chooseDropShot(drops, suitDropsDict, attackDuration, enterDuration = 0.0, exitDuration = 0.0):

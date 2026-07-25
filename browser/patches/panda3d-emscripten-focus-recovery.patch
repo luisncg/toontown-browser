@@ -1,0 +1,14 @@
+diff --git a/panda/src/webgldisplay/webGLGraphicsWindow.cxx b/panda/src/webgldisplay/webGLGraphicsWindow.cxx
+--- a/panda/src/webgldisplay/webGLGraphicsWindow.cxx
++++ b/panda/src/webgldisplay/webGLGraphicsWindow.cxx
+@@ -541,6 +541,10 @@ on_focus_event(int type, const EmscriptenFocusEvent *event, void *user_data) {
+     window->system_changed_properties(props);
+     return true;
+   } else if (type == EMSCRIPTEN_EVENT_BLUR) {
++    // Browser and OS shortcuts can steal focus before their key-up events
++    // reach the canvas. Match the native window backends by releasing every
++    // button Panda still considers held when the canvas loses focus.
++    window->_input->focus_lost();
+     WindowProperties props;
+     props.set_foreground(false);
+     window->system_changed_properties(props);

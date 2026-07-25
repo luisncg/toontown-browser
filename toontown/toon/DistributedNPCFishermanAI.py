@@ -72,14 +72,22 @@ class DistributedNPCFishermanAI(DistributedNPCToonBaseAI):
         if sell:
             av = simbase.air.doId2do.get(avId)
             if av:
-                trophyResult = self.air.fishManager.creditFishTank(av)
-                if trophyResult:
-                    movieType = NPCToons.SELL_MOVIE_TROPHY
-                    extraArgs = [len(av.fishCollection), FishGlobals.getTotalNumFish()]
-                else:
-                    movieType = NPCToons.SELL_MOVIE_COMPLETE
-                    extraArgs = []
-                self.d_setMovie(avId, movieType, extraArgs)
+                def sold(trophyResult):
+                    if self.busy != avId:
+                        return
+                    if trophyResult:
+                        movieType = NPCToons.SELL_MOVIE_TROPHY
+                        extraArgs = [
+                            len(av.fishCollection),
+                            FishGlobals.getTotalNumFish()]
+                    else:
+                        movieType = NPCToons.SELL_MOVIE_COMPLETE
+                        extraArgs = []
+                    self.d_setMovie(avId, movieType, extraArgs)
+                    self.sendClearMovie(None)
+
+                self.air.fishManager.creditFishTank(av, sold)
+                return
         else:
             av = simbase.air.doId2do.get(avId)
             if av:

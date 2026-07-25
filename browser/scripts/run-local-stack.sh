@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SERVER_ENGINE="${PROJECT_ROOT}/.toolchain/build/panda3d-native-server"
+ASTRON_DIR="${PROJECT_ROOT}/astron/darwin"
+ASTRON_BINARY="${ASTRON_DIR}/astrond"
+LOG_DIR="${PROJECT_ROOT}/.build-wasm/logs"
+PYTHON_BIN="${HOST_PYTHON:-$(command -v python3.12 || true)}"
+PIDS=()
+AI_CONFIG_FILES=("etc/Configrc.prc")
+
+if [[ "${FISH_BINGO_FORCE_ACTIVE:-0}" == "1" ]]; then
+  AI_CONFIG_FILES+=("browser/config/fish-bingo-smoke.prc")
+fi
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+  printf 'Python 3.12 is required.\n' >&2
+  exit 1
+fi
+if [[ ! -x "${ASTRON_BINARY}" ]]; then
+  printf 'Astron is missing: %s\n' "${ASTRON_BINARY}" >&2
+  exit 1
+fi
+if [[ ! -f "${SERVER_ENGINE}/panda3d/toontown.cpython-312-darwin.so" ]]; then
+  printf 'The native server engine is missing. Run npm run build:server first.\n' >&2
+  exit 1
+fi
+if [[ ! -f "${PROJECT_ROOT}/dist-web/open-toontown.wasm" ]]; then
+  printf 'The browser game is missing. Run npm run build:game first.\n' >&2
+  exit 1
+fi
+if [[ ! -d "${PROJECT_ROOT}/node_modules/ws" ]]; then
+  printf 'Node dependencies are missing. Run npm install first.\n' >&2
+  exit 1
+fi
+if ! command -v brew >/dev/null 2>&1; then
+  printf 'Homebrew ODE is required by the native Panda3D runtime.\n' >&2
+  exit 1
+fi
+
+ODE_PREFIX="$(brew --prefix ode 2>/dev/null || true)"
+if [[ -z "${ODE_PREFIX}" ]] || [[ ! -f "${ODE_PREFIX}/lib/libode.dylib" ]]; then
+  printf 'Homebrew ODE is missing. Install it with: brew install ode\n' >&2
+  exit 1
+fi
+
+for port in 7197 7198 7199 7200 8180; do
+  if lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+    printf 'Port %s is already in use; refusing to stop an unknown process.\n' "${port}" >&2
+    exit 1
+  fi
+done
+
+mkdir -p "${LOG_DIR}"
+
+cleanup() {
+  local pid
+  trap - EXIT INT TERM
+  for pid in "${PIDS[@]}"; do
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      kill "${pid}" >/dev/null 2>&1 || true
+    fi
+  done
+  wait "${PIDS[@]}" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+wait_for_port() {
+  local port="$1"
+  local label="$2"
+  local attempts="${3:-120}"
+  local attempt
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if nc -z 127.0.0.1 "${port}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf '%s did not listen on port %s. See %s.\n' "${label}" "${port}" "${LOG_DIR}" >&2
+  return 1
+}
+
+wait_for_log() {
+  local file="$1"
+  local pattern="$2"
+  local label="$3"
+  local attempts="${4:-480}"
+  local attempt
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if rg -q "${pattern}" "${file}" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf '%s did not become ready. See %s.\n' "${label}" "${file}" >&2
+  return 1
+}
+
+export PYTHONPATH="${SERVER_ENGINE}:${PROJECT_ROOT}"
+export DYLD_LIBRARY_PATH="${SERVER_ENGINE}/lib:${ODE_PREFIX}/lib"
+
+(
+  cd "${ASTRON_DIR}"
+  exec ./astrond --loglevel info ../config/astrond.yml
+) >"${LOG_DIR}/astron.log" 2>&1 &
+PIDS+=("$!")
+wait_for_port 7199 "Astron message director"
+wait_for_port 7198 "Astron client agent"
+
+"${PYTHON_BIN}" -u -m toontown.uberdog.UDStart \
+  --base-channel 1000000 \
+  --max-channels 999999 \
+  --stateserver 4002 \
+  --messagedirector-ip 127.0.0.1:7199 \
+  --eventlogger-ip 127.0.0.1:7197 \
+  >"${LOG_DIR}/uberdog.log" 2>&1 &
+PIDS+=("$!")
+wait_for_log "${LOG_DIR}/uberdog.log" 'UberDOG server is ready\.' "UberDOG"
+
+"${PYTHON_BIN}" -u -m toontown.ai.AIStart \
+  --base-channel 401000000 \
+  --max-channels 999999 \
+  --stateserver 4002 \
+  --messagedirector-ip 127.0.0.1:7199 \
+  --eventlogger-ip 127.0.0.1:7197 \
+  --district-name 'Toon Valley' \
+  "${AI_CONFIG_FILES[@]}" \
+  >"${LOG_DIR}/ai.log" 2>&1 &
+PIDS+=("$!")
+wait_for_log "${LOG_DIR}/ai.log" 'ToontownAIRepository: Done\.' "AI district"
+
+node "${PROJECT_ROOT}/browser/gateway/server.mjs" \
+  >"${LOG_DIR}/gateway.log" 2>&1 &
+PIDS+=("$!")
+wait_for_port 7200 "WebSocket gateway"
+
+node "${PROJECT_ROOT}/browser/scripts/serve.mjs" "${PROJECT_ROOT}/dist-web" \
+  >"${LOG_DIR}/web.log" 2>&1 &
+PIDS+=("$!")
+wait_for_port 8180 "browser server"
+
+printf '\nOpen Toontown is ready at http://127.0.0.1:8180\n'
+printf 'Logs: %s\n' "${LOG_DIR}"
+printf 'Press Ctrl-C to stop this local stack.\n\n'
+if [[ "${OPEN_TOONTOWN_NO_OPEN:-0}" != "1" ]]; then
+  open 'http://127.0.0.1:8180'
+fi
+
+while true; do
+  for pid in "${PIDS[@]}"; do
+    if ! kill -0 "${pid}" >/dev/null 2>&1; then
+      printf 'A local stack process exited. See %s.\n' "${LOG_DIR}" >&2
+      exit 1
+    fi
+  done
+  sleep 2
+done

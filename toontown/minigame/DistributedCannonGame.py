@@ -18,6 +18,7 @@ from toontown.minigame.Trajectory import Trajectory
 from toontown.toon.ToonHead import ToonHead
 from toontown.toonbase import ToontownGlobals
 from toontown.toonbase import TTLocalizer
+from toontown.toonbase import KeybindSettings
 from toontown.toonbase.ToonBaseGlobal import base
 from toontown.toonbase.ToontownTimer import ToontownTimer
 
@@ -493,6 +494,12 @@ class DistributedCannonGame(DistributedMinigame):
 
     def __enableAimInterface(self):
         self.aimPad.show()
+        movementEvents = KeybindSettings.getActiveMovementEvents()
+        self.FIRE_KEY = KeybindSettings.getActiveEvent('performAction')
+        self.UP_KEY = movementEvents['up']
+        self.DOWN_KEY = movementEvents['down']
+        self.LEFT_KEY = movementEvents['left']
+        self.RIGHT_KEY = movementEvents['right']
         self.accept(self.FIRE_KEY, self.__fireKeyPressed)
         self.accept(self.UP_KEY, self.__upKeyPressed)
         self.accept(self.DOWN_KEY, self.__downKeyPressed)

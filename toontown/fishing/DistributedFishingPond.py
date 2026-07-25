@@ -27,6 +27,12 @@ class DistributedFishingPond(DistributedObject.DistributedObject):
         self.stopCheckingTargets()
         DistributedObject.DistributedObject.disable(self)
 
+    def announceGenerate(self):
+        DistributedObject.DistributedObject.announceGenerate(self)
+        self.notify.info(
+            'Fishing pond ready in area %s with doId %s' %
+            (self.area, self.doId))
+
     def setArea(self, area):
         self.area = area
 
@@ -81,9 +87,9 @@ class DistributedFishingPond(DistributedObject.DistributedObject):
     def setPondBingoManager(self, pondBingoMgr):
         self.pondBingoMgr = pondBingoMgr
 
-    def removePondBingoManager(self):
-        del self.pondBingoMgr
-        self.pondBingoMgr = None
+    def removePondBingoManager(self, bingoMgr=None):
+        if bingoMgr is None or self.pondBingoMgr is bingoMgr:
+            self.pondBingoMgr = None
         return
 
     def getPondBingoManager(self):

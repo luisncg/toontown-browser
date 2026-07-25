@@ -43,6 +43,7 @@ class DistributedGarden(DistributedObject.DistributedObject):
 
     def announceGenerate(self):
         DistributedObject.DistributedObject.announceGenerate(self)
+        self.notify.info('Estate garden root ready')
 
     def disable(self):
         DistributedObject.DistributedObject.disable(self)

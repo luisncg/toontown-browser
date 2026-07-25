@@ -22,6 +22,29 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
     def getHq(self):
         return self.hq
 
+    def setBusyAvatar(self, avId):
+        if self.busy:
+            self.ignore(self.air.getAvatarExitEvent(self.busy))
+        self.busy = avId
+        if avId:
+            self.acceptOnce(
+                self.air.getAvatarExitEvent(avId),
+                self.handleUnexpectedExit,
+                extraArgs=[avId])
+
+    def clearBusyAvatar(self):
+        if self.busy:
+            self.ignore(self.air.getAvatarExitEvent(self.busy))
+        self.busy = 0
+
+    def handleUnexpectedExit(self, avId):
+        if self.busy != avId:
+            return
+        self.notify.warning(
+            'avatar %s exited during a special NPC movie; clearing the movie' % avId)
+        taskMgr.remove(self.uniqueName('clearMovie'))
+        self.sendClearMovie(None)
+
     def avatarEnter(self):
         avId = self.air.getAvatarIdFromSender()
         self.notify.debug('avatar enter ' + str(avId))
@@ -97,7 +120,6 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
          [],
          ClockDelta.globalClockDelta.getRealNetworkTime()])
         self.sendClearMovie(None)
-        self.busy = 0
         return Task.done
 
     def sendClearMovie(self, task):
@@ -105,7 +127,8 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
         self.pendingQuests = None
         self.pendingTracks = None
         self.pendingTrackQuest = None
-        self.busy = 0
+        taskMgr.remove(self.uniqueName('clearMovie'))
+        self.clearBusyAvatar()
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_CLEAR,
          self.npcId,
          0,
@@ -114,7 +137,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
         return Task.done
 
     def rejectAvatar(self, avId):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_REJECT,
          self.npcId,
          avId,
@@ -124,7 +147,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(5.5, self.sendClearMovie, self.uniqueName('clearMovie'))
 
     def rejectAvatarTierNotDone(self, avId):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_TIER_NOT_DONE,
          self.npcId,
          avId,
@@ -134,7 +157,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(5.5, self.sendClearMovie, self.uniqueName('clearMovie'))
 
     def completeQuest(self, avId, questId, rewardId):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_COMPLETE,
          self.npcId,
          avId,
@@ -144,7 +167,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(60.0, self.sendTimeoutMovie, self.uniqueName('clearMovie'))
 
     def incompleteQuest(self, avId, questId, completeStatus, toNpcId):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_INCOMPLETE,
          self.npcId,
          avId,
@@ -154,7 +177,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(60.0, self.sendTimeoutMovie, self.uniqueName('clearMovie'))
 
     def assignQuest(self, avId, questId, rewardId, toNpcId):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         if self.questCallback:
             self.questCallback()
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_ASSIGN,
@@ -166,7 +189,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(60.0, self.sendTimeoutMovie, self.uniqueName('clearMovie'))
 
     def presentQuestChoice(self, avId, quests):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.pendingAvId = avId
         self.pendingQuests = quests
         flatQuests = []
@@ -182,7 +205,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(60.0, self.sendTimeoutMovie, self.uniqueName('clearMovie'))
 
     def presentTrackChoice(self, avId, questId, tracks):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.pendingAvId = avId
         self.pendingTracks = tracks
         self.pendingTrackQuest = questId
@@ -195,7 +218,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(60.0, self.sendTimeoutMovie, self.uniqueName('clearMovie'))
 
     def cancelChoseQuest(self, avId):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_QUEST_CHOICE_CANCEL,
          self.npcId,
          avId,
@@ -205,7 +228,7 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
             taskMgr.doMethodLater(60.0, self.sendTimeoutMovie, self.uniqueName('clearMovie'))
 
     def cancelChoseTrack(self, avId):
-        self.busy = avId
+        self.setBusyAvatar(avId)
         self.sendUpdate('setMovie', [NPCToons.QUEST_MOVIE_TRACK_CHOICE_CANCEL,
          self.npcId,
          avId,

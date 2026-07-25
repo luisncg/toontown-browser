@@ -41,7 +41,7 @@ while not launcher.getGame2Done():
 print('ToontownStart: Game2 is finished.')
 print('ToontownStart: Starting the game.')
 if launcher.isDummy():
-    http = HTTPClient()
+    http = HTTPClient.getGlobalPtr() if sys.platform == 'emscripten' else HTTPClient()
 else:
     http = launcher.http
 

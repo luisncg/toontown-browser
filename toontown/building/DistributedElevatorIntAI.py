@@ -12,8 +12,10 @@ from toontown.battle import BattleBase
 
 class DistributedElevatorIntAI(DistributedElevatorAI.DistributedElevatorAI):
 
-    def __init__(self, air, bldg, avIds):
-        DistributedElevatorAI.DistributedElevatorAI.__init__(self, air, bldg)
+    def __init__(self, air, bldg, avIds, seatCount=4):
+        seatCount = max(4, int(seatCount), len(avIds))
+        DistributedElevatorAI.DistributedElevatorAI.__init__(
+            self, air, bldg, numSeats=seatCount)
         self.countdownTime = simbase.config.GetFloat('int-elevator-timeout', INTERIOR_ELEVATOR_COUNTDOWN_TIME)
         self.avIds = copy.copy(avIds)
         for avId in avIds:
@@ -99,7 +101,7 @@ class DistributedElevatorIntAI(DistributedElevatorAI.DistributedElevatorAI):
 
     def allAboard(self):
         if len(self.avIds) == 0:
-            self.bldg.handleAllAboard([None, None, None, None])
+            self.bldg.handleAllAboard([None] * len(self.seats))
         else:
             self.fsm.request('allAboard')
         return
