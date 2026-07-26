@@ -34,6 +34,7 @@
     "test:browser-dc-pruning": "python3 -m unittest browser.tests.test_browser_dc_pruning",
     "test:dc-schema-compatibility": "PYTHONPATH=.toolchain/build/panda3d-native-server:. python3.12 -m unittest browser.tests.test_dc_schema_compatibility",
     "test:battle-sound-index": "python3 -m unittest browser.tests.test_battle_sound_index",
+    "test:cog-battle-warmup": "python3 -m unittest browser.tests.test_cog_battle_warmup",
     "test:short-audio-banks": "PYTHONPATH=.toolchain/build/panda3d-native-server:. python3.12 -m unittest browser.tests.test_short_audio_banks",
     "test:short-audio-runtime": "node ./browser/tests/short_audio_banks.mjs",
     "test:short-audio-browser": ".build-wasm/playwright-venv/bin/python browser/tests/smoke_short_audio_banks.py",

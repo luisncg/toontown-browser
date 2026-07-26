@@ -37,6 +37,27 @@ with sync_playwright() as playwright:
     assert context.request.get(f"{ORIGIN}/r2-assets.json").status == 404
     assert context.request.get(f"{ORIGIN}/open-toontown.data.gz").status == 404
     assert context.request.get(f"{ORIGIN}/open-toontown.wasm.gz").status == 404
+    phase_manifest_response = context.request.get(
+        f"{ORIGIN}/phase-manifest.json"
+    )
+    audio_manifest_response = context.request.get(
+        f"{ORIGIN}/audio-bank-manifest.json"
+    )
+    assert phase_manifest_response.status == 200
+    assert audio_manifest_response.status == 200
+    phase_manifest = phase_manifest_response.json()
+    audio_manifest = audio_manifest_response.json()
+    phase_4 = next(
+        phase for phase in phase_manifest["phases"] if phase["phase"] == "4"
+    )
+    expected_boot_tickets = (
+        2
+        + len(phase_4["parts"])
+        + sum(
+            bank["phase"] == "boot"
+            for bank in audio_manifest["banks"]
+        )
+    )
 
     def load_and_record():
         page = context.new_page()
@@ -177,9 +198,15 @@ with sync_playwright() as playwright:
         "window.__toontownBootDiagnostics"
     )
     assert cold_ticket_diagnostics["batches"] == 1
-    assert cold_ticket_diagnostics["requested"] == 26
-    assert cold_ticket_diagnostics["issued"] == 26
-    assert cold_ticket_diagnostics["uses"] == 26
+    assert (
+        cold_ticket_diagnostics["requested"] == expected_boot_tickets
+    ), cold_ticket_diagnostics
+    assert (
+        cold_ticket_diagnostics["issued"] == expected_boot_tickets
+    ), cold_ticket_diagnostics
+    assert (
+        cold_ticket_diagnostics["uses"] == expected_boot_tickets
+    ), cold_ticket_diagnostics
     assert (
         cold_boot_diagnostics["phase4StartedAt"]
         <= cold_boot_diagnostics["runtimeStartedAt"]

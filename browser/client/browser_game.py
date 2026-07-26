@@ -204,6 +204,7 @@ from direct.interval.IntervalManager import IntervalManager  # noqa: E402
 from direct.interval.ActorInterval import ActorInterval  # noqa: E402
 from direct.actor.Actor import Actor  # noqa: E402
 from panda3d.direct import CIntervalManager  # noqa: E402
+from toontown.battle import BattleParticles  # noqa: E402
 from toontown.battle.BattleProps import PropPool, globalPropPool  # noqa: E402
 from toontown.battle.BattleSounds import BattleSounds  # noqa: E402
 
@@ -397,6 +398,253 @@ def _profile_browser_battle_sound(self, name):
             token, totalMs))
 
 
+_original_battle_particles_load = BattleParticles.loadParticles
+_original_battle_particles_unload = BattleParticles.unloadParticles
+_original_battle_particle_file_load = BattleParticles.loadParticleFile
+_browser_particle_config_code = {}
+_browser_particle_config_requests = {}
+_browser_particle_model_retained = False
+_browser_particle_warmup_active = False
+
+
+def _cache_browser_particle_config(name, indexedPath=None):
+    """Compile a mounted PTF once so later attacks skip VFS read/compile."""
+    token = _browser_performance_token(name)
+    if token in _browser_particle_config_code:
+        return
+    pfile = Filename(indexedPath or name)
+    if not pfile.isRegularFile():
+        searchPath = BattleParticles.particleSearchPath
+        if (
+            searchPath is None
+            or not builtins.vfs.resolveFilename(pfile, searchPath)
+        ):
+            return
+    data = builtins.vfs.readFile(pfile, True).replace(b'\r', b'')
+    _browser_particle_config_code[token] = compile(
+        data,
+        pfile.getFullpath(),
+        'exec',
+    )
+
+
+def _profile_browser_battle_particles_load():
+    global _browser_particle_model_retained
+    cold = BattleParticles.particleModel is None
+    startedAt = time.perf_counter()
+    try:
+        return _original_battle_particles_load()
+    finally:
+        elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+        if BattleParticles.particleModel is not None:
+            # The shared particle atlas is tiny and phase 3.5 is always
+            # mounted. Keeping it avoids paying its first-use model/texture
+            # setup again after every playground transition.
+            _browser_particle_model_retained = True
+        print('[BrowserPerformanceBattleParticle] model suit-particles %s %s' % (
+            'cold' if cold else 'cached',
+            elapsedMs,
+        ))
+
+
+def _preserve_browser_battle_particles():
+    if (
+        _browser_particle_model_retained
+        and BattleParticles.particleModel is not None
+    ):
+        print(
+            '[BrowserPerformanceBattleParticle] '
+            'model suit-particles preserved 0'
+        )
+        return
+    return _original_battle_particles_unload()
+
+
+def _profile_browser_battle_particle_file(name):
+    token = _browser_performance_token(name)
+    requestCount = _browser_particle_config_requests.get(token, 0) + 1
+    _browser_particle_config_requests[token] = requestCount
+    cachedCode = _browser_particle_config_code.get(token)
+    status = 'cached' if cachedCode is not None else 'cold'
+    startedAt = time.perf_counter()
+    try:
+        if cachedCode is None:
+            indexedPath = _BROWSER_COG_PARTICLE_PATHS.get(token)
+            if indexedPath:
+                # The preserved loader's phase search intentionally probes
+                # older phases first. Exact VFS paths avoid four rounds of
+                # browser 404s for every known phase-5 Cog particle config.
+                effect = BattleParticles.ParticleEffect()
+                effect.loadConfig(Filename(indexedPath))
+            else:
+                effect = _original_battle_particle_file_load(name)
+            if effect is not None:
+                _cache_browser_particle_config(name, indexedPath)
+            return effect
+
+        effect = BattleParticles.ParticleEffect()
+        exec(
+            cachedCode,
+            BattleParticles.ParticleEffect.loadConfig.__globals__,
+            {'self': effect},
+        )
+        return effect
+    finally:
+        elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+        # The first cold and cached requests establish whether warmup worked.
+        # Later requests are only interesting when they are measurably slow.
+        if (
+            not _browser_particle_warmup_active
+            and (requestCount <= 2 or elapsedMs >= 20)
+        ):
+            print(
+                '[BrowserPerformanceBattleParticle] config %s %s %s' % (
+                    token,
+                    status,
+                    elapsedMs,
+                )
+            )
+
+
+# These are the PTF files actually used by Cog attack movie construction and
+# confirmed to live in phase 5. Finger Wag is first because production timing
+# isolated it as the current MML stall. Work is spread across task frames.
+_BROWSER_COG_PARTICLE_WARMUP = (
+    'fingerwag.ptf',
+    'smile.ptf',
+    'synergy.ptf',
+    'synergyWaterfall.ptf',
+    'brainStorm.ptf',
+    'buzzWord.ptf',
+    'demotionSpray.ptf',
+    'demotionFreeze.ptf',
+    'demotionUnFreeze.ptf',
+    'downsizeSpray.ptf',
+    'downsizeCloud.ptf',
+    'reorgSpray.ptf',
+    'headShrinkSpray.ptf',
+    'headShrinkCloud.ptf',
+    'headShrinkDrop.ptf',
+    'rollodexWaterfall.ptf',
+    'rollodexStream.ptf',
+    'doubleTalkLeft.ptf',
+    'doubleTalkRight.ptf',
+    'freezeAssets.ptf',
+    'hotAirSpray.ptf',
+    'firedBaseFlame.ptf',
+    'firedFlame.ptf',
+    'spriteFiredFlecks.ptf',
+    'filibusterSpray.ptf',
+    'schmoozeUpperSpray.ptf',
+    'schmoozeLowerSpray.ptf',
+    'shiftSpray.ptf',
+    'pixieDrop.ptf',
+    'powertrip.ptf',
+    'powertrip2.ptf',
+    'waterfall.ptf',
+    'calculate.ptf',
+    'numberSpill.ptf',
+    'numberSpray.ptf',
+    'liquidate.ptf',
+    'withdrawal.ptf',
+    'jargonSpray.ptf',
+    'mumboJumboSpray.ptf',
+    'mumboJumboSmother.ptf',
+    'guiltTrip.ptf',
+    'restrainingOrderCloud.ptf',
+    'spinSpray.ptf',
+    'spinEffect.ptf',
+    'legaleseSpray.ptf',
+    'fillWithLeadSpray.ptf',
+    'fillWithLeadSmother.ptf',
+    'penSpill.ptf',
+)
+_BROWSER_COG_ANIMATION_WARMUP = (
+    'phase_5/models/char/suitA-fingerwag',
+    'phase_5/models/char/suitB-finger-wag',
+    'phase_5/models/char/suitC-finger-wag',
+)
+_BROWSER_COG_PARTICLE_PATHS = {
+    name.lower(): '/resources/phase_5/etc/' + name
+    for name in _BROWSER_COG_PARTICLE_WARMUP
+}
+_browser_cog_warmup_queue = None
+_browser_cog_warmup_model_refs = []
+
+
+def _browser_cog_warmup_safe():
+    localAvatar = getattr(builtins.base, 'localAvatar', None)
+    return localAvatar is None or not getattr(localAvatar, 'battleId', 0)
+
+
+def _warm_browser_cog_battle_assets(task):
+    """Warm one confirmed Cog dependency per tick after phase 5 mounts."""
+    global _browser_cog_warmup_queue, _browser_particle_warmup_active
+    if not builtins.launcher.getPhaseComplete(5):
+        return task.again
+    if not _browser_cog_warmup_safe():
+        return task.again
+    if _browser_cog_warmup_queue is None:
+        _browser_cog_warmup_queue = [
+            ('model', 'suit-particles'),
+            ('config', _BROWSER_COG_PARTICLE_WARMUP[0]),
+        ]
+        _browser_cog_warmup_queue.extend(
+            ('animation', path)
+            for path in _BROWSER_COG_ANIMATION_WARMUP
+        )
+        _browser_cog_warmup_queue.extend(
+            ('config', name)
+            for name in _BROWSER_COG_PARTICLE_WARMUP[1:]
+        )
+    if not _browser_cog_warmup_queue:
+        print('[BrowserPerformanceBattleParticle] warmup complete ready 0')
+        return task.done
+
+    kind, name = _browser_cog_warmup_queue.pop(0)
+    token = _browser_performance_token(name)
+    startedAt = time.perf_counter()
+    status = 'ready'
+    effect = None
+    _browser_particle_warmup_active = True
+    try:
+        if kind == 'model':
+            BattleParticles.loadParticles()
+        elif kind == 'animation':
+            _browser_cog_warmup_model_refs.append(
+                builtins.base.loader.loadModel(name)
+            )
+        else:
+            effect = BattleParticles.loadParticleFile(name)
+            if effect is None:
+                status = 'error'
+    except Exception:
+        status = 'error'
+        print('[BrowserCogWarmup] failed %s %s' % (kind, token))
+    finally:
+        try:
+            if effect is not None:
+                effect.cleanup()
+        except Exception:
+            status = 'error'
+            print('[BrowserCogWarmup] cleanup failed %s %s' % (kind, token))
+        finally:
+            _browser_particle_warmup_active = False
+        elapsedMs = int((time.perf_counter() - startedAt) * 1000.0)
+        if (
+            kind != 'config'
+            or token == 'fingerwag.ptf'
+            or status == 'error'
+            or elapsedMs >= 20
+        ):
+            print('[BrowserPerformanceBattleParticle] warmup %s %s %s' % (
+                token,
+                status,
+                elapsedMs,
+            ))
+    return task.again
+
+
 _original_actor_load_model = Actor.loadModel
 _original_actor_load_anims = Actor.loadAnims
 
@@ -471,11 +719,19 @@ def _profile_browser_actor_interval_init(
 
 PropPool.getProp = _profile_browser_battle_prop
 BattleSounds.getSound = _profile_browser_battle_sound
+BattleParticles.loadParticles = _profile_browser_battle_particles_load
+BattleParticles.unloadParticles = _preserve_browser_battle_particles
+BattleParticles.loadParticleFile = _profile_browser_battle_particle_file
 Actor.loadModel = _profile_browser_actor_load_model
 Actor.loadAnims = _profile_browser_actor_load_anims
 Actor.getAnimControls = _profile_browser_actor_get_anim_controls
 ActorInterval.__init__ = _profile_browser_actor_interval_init
 browser_audio.install_audio_state_hooks()
+builtins.base.taskMgr.doMethodLater(
+    0.1,
+    _warm_browser_cog_battle_assets,
+    'browser-cog-battle-warmup',
+)
 
 
 def _report_browser_actor_animation(

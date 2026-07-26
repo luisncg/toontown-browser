@@ -138,6 +138,7 @@ with sync_playwright() as playwright:
           console.log('[BrowserPerformanceBattleBuild] throw construct 1 6429');
           console.log('[BrowserPerformanceBattleStage] toon_movie 6438');
           console.log('[BrowserPerformanceBattleAsset] prop splat-tart cold 3800');
+          console.log('[BrowserPerformanceBattleParticle] config fingerwag.ptf cached 2');
           console.log('[BrowserPerformanceBattleSound] aa_tart_only.ogg first 1 web_audio 0 0 1');
           console.log('[BrowserPerformanceBattleSound] aa_tart_only.ogg repeat 2 retained 0 3 3');
           console.log('[BrowserPerformanceAnimationBind] toon throw 1 2100');
@@ -225,6 +226,9 @@ actor_animation = next(
 battle_build = next(event for event in events if event["type"] == "battle_build")
 battle_stage = next(event for event in events if event["type"] == "battle_stage")
 battle_asset = next(event for event in events if event["type"] == "battle_asset")
+battle_particle = next(
+    event for event in events if event["type"] == "battle_particle"
+)
 battle_sound_first = next(
     event
     for event in events
@@ -293,6 +297,7 @@ result = {
     "battle_build": battle_build["track"],
     "battle_stage": battle_stage["stage"],
     "battle_asset": battle_asset["asset"],
+    "battle_particle": battle_particle["asset"],
     "battle_sound_first_ms": battle_sound_first["managerMs"],
     "battle_sound_repeat_ms": battle_sound_repeat["managerMs"],
     "background_away_ms": lifecycle_visible["awayMs"],
@@ -369,6 +374,10 @@ assert battle_asset["kind"] == "prop"
 assert battle_asset["asset"] == "splat-tart"
 assert battle_asset["status"] == "cold"
 assert battle_asset["durationMs"] == 3800
+assert battle_particle["stage"] == "config"
+assert battle_particle["asset"] == "fingerwag.ptf"
+assert battle_particle["status"] == "cached"
+assert battle_particle["durationMs"] == 2
 assert battle_sound_first["sound"] == "aa_tart_only.ogg"
 assert battle_sound_first["lookupStatus"] == "web_audio"
 assert battle_sound_repeat["lookupStatus"] == "retained"

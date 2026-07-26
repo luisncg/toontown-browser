@@ -970,6 +970,16 @@ try {
         password: "private-password-value",
       },
       {
+        type: "battle_particle",
+        atMs: 6_060,
+        stage: "config",
+        asset: "fingerwag.ptf",
+        status: "cached",
+        durationMs: 2,
+        state: "tutorial",
+        account: "private-account-value",
+      },
+      {
         type: "battle_sound",
         atMs: 6_075,
         sound: "aa_tart_only.ogg",
@@ -1056,7 +1066,7 @@ try {
   const loggedBattlePerformance = JSON.parse(
     battlePerformanceLine.slice("[BrowserPerformance] ".length),
   );
-  assert.equal(loggedBattlePerformance.events.length, 9);
+  assert.equal(loggedBattlePerformance.events.length, 10);
   assert.equal(loggedBattlePerformance.events[0].type, "battle_build");
   assert.equal(loggedBattlePerformance.events[0].track, "throw");
   assert.equal(loggedBattlePerformance.events[0].durationMs, 6_429);
@@ -1066,36 +1076,41 @@ try {
   assert.equal(loggedBattlePerformance.events[2].type, "battle_asset");
   assert.equal(loggedBattlePerformance.events[2].asset, "splat-tart");
   assert.equal(loggedBattlePerformance.events[2].status, "cold");
-  assert.equal(loggedBattlePerformance.events[3].type, "battle_sound");
-  assert.equal(loggedBattlePerformance.events[3].sound, "aa_tart_only.ogg");
-  assert.equal(loggedBattlePerformance.events[3].requestStatus, "first");
-  assert.equal(loggedBattlePerformance.events[3].requestCount, 1);
-  assert.equal(loggedBattlePerformance.events[3].lookupStatus, "indexed");
-  assert.equal(loggedBattlePerformance.events[3].resolveMs, 0);
-  assert.equal(loggedBattlePerformance.events[3].managerMs, 979);
-  assert.equal(loggedBattlePerformance.events[3].totalMs, 980);
+  assert.equal(loggedBattlePerformance.events[3].type, "battle_particle");
+  assert.equal(loggedBattlePerformance.events[3].stage, "config");
+  assert.equal(loggedBattlePerformance.events[3].asset, "fingerwag.ptf");
+  assert.equal(loggedBattlePerformance.events[3].status, "cached");
+  assert.equal(loggedBattlePerformance.events[3].durationMs, 2);
   assert.equal(loggedBattlePerformance.events[4].type, "battle_sound");
-  assert.equal(loggedBattlePerformance.events[4].requestStatus, "repeat");
-  assert.equal(loggedBattlePerformance.events[4].requestCount, 2);
-  assert.equal(loggedBattlePerformance.events[4].lookupStatus, "fallback");
-  assert.equal(loggedBattlePerformance.events[4].managerMs, 3);
-  assert.equal(loggedBattlePerformance.events[5].type, "lifecycle");
-  assert.equal(loggedBattlePerformance.events[5].visibility, "visible");
-  assert.equal(loggedBattlePerformance.events[5].awayMs, 4_080);
+  assert.equal(loggedBattlePerformance.events[4].sound, "aa_tart_only.ogg");
+  assert.equal(loggedBattlePerformance.events[4].requestStatus, "first");
+  assert.equal(loggedBattlePerformance.events[4].requestCount, 1);
+  assert.equal(loggedBattlePerformance.events[4].lookupStatus, "indexed");
+  assert.equal(loggedBattlePerformance.events[4].resolveMs, 0);
+  assert.equal(loggedBattlePerformance.events[4].managerMs, 979);
+  assert.equal(loggedBattlePerformance.events[4].totalMs, 980);
+  assert.equal(loggedBattlePerformance.events[5].type, "battle_sound");
+  assert.equal(loggedBattlePerformance.events[5].requestStatus, "repeat");
+  assert.equal(loggedBattlePerformance.events[5].requestCount, 2);
+  assert.equal(loggedBattlePerformance.events[5].lookupStatus, "fallback");
+  assert.equal(loggedBattlePerformance.events[5].managerMs, 3);
+  assert.equal(loggedBattlePerformance.events[6].type, "lifecycle");
+  assert.equal(loggedBattlePerformance.events[6].visibility, "visible");
+  assert.equal(loggedBattlePerformance.events[6].awayMs, 4_080);
   assert.equal(
-    loggedBattlePerformance.events[6].type,
+    loggedBattlePerformance.events[7].type,
     "audio_lifecycle",
   );
-  assert.equal(loggedBattlePerformance.events[6].stage, "resume");
-  assert.equal(loggedBattlePerformance.events[6].trigger, "visibility");
-  assert.equal(loggedBattlePerformance.events[6].recovered, 2);
-  assert.equal(loggedBattlePerformance.events[6].gesture, false);
-  assert.ok(!("beforeStates" in loggedBattlePerformance.events[6]));
-  assert.equal(loggedBattlePerformance.events[7].type, "animation_bind");
-  assert.equal(loggedBattlePerformance.events[7].animation, "throw");
-  assert.equal(loggedBattlePerformance.events[7].controls, 1);
+  assert.equal(loggedBattlePerformance.events[7].stage, "resume");
+  assert.equal(loggedBattlePerformance.events[7].trigger, "visibility");
+  assert.equal(loggedBattlePerformance.events[7].recovered, 2);
+  assert.equal(loggedBattlePerformance.events[7].gesture, false);
+  assert.ok(!("beforeStates" in loggedBattlePerformance.events[7]));
+  assert.equal(loggedBattlePerformance.events[8].type, "animation_bind");
+  assert.equal(loggedBattlePerformance.events[8].animation, "throw");
+  assert.equal(loggedBattlePerformance.events[8].controls, 1);
   assert.equal(
-    loggedBattlePerformance.events[8].type,
+    loggedBattlePerformance.events[9].type,
     "actor_interval_build",
   );
   assert.ok(!battlePerformanceLine.includes("private-account-value"));

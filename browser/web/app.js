@@ -630,6 +630,15 @@ function createBrowserPerformanceTelemetry() {
         state: currentState,
       });
     },
+    recordBattleParticle(stage, asset, status, durationMs) {
+      record("battle_particle", {
+        stage,
+        asset,
+        status,
+        durationMs,
+        state: currentState,
+      });
+    },
     recordBattleSound(
       sound,
       requestStatus,
@@ -2577,6 +2586,17 @@ console.log = (...parts) => {
       battleAsset[2],
       battleAsset[3],
       Number(battleAsset[4]),
+    );
+  }
+  const battleParticle = line.match(
+    /\[BrowserPerformanceBattleParticle\]\s+(model|config|warmup)\s+([a-z0-9][a-z0-9_.-]{0,63})\s+(cold|cached|preserved|ready|error)\s+(\d+)/,
+  );
+  if (battleParticle) {
+    window.ToontownPerformanceTelemetry.recordBattleParticle(
+      battleParticle[1],
+      battleParticle[2],
+      battleParticle[3],
+      Number(battleParticle[4]),
     );
   }
   const battleSound = line.match(

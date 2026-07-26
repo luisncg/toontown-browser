@@ -374,6 +374,12 @@ with sync_playwright() as playwright:
             }""",
             timeout=240_000,
         )
+        wait_for_console(
+            first_page,
+            first_console,
+            "[BrowserPerformanceBattleParticle] warmup complete ready 0",
+            timeout=30,
+        )
     except Exception:
         print(json.dumps({
             "phase_data_before_selection": phase_data_before_selection,
@@ -465,6 +471,12 @@ with sync_playwright() as playwright:
                     );
             }""",
             timeout=180_000,
+        )
+        wait_for_console(
+            second_page,
+            second_console,
+            "[BrowserPerformanceBattleParticle] warmup complete ready 0",
+            timeout=30,
         )
     except Exception:
         print(json.dumps({

@@ -405,6 +405,7 @@ const performanceEventTypes = new Set([
   "battle_build",
   "battle_stage",
   "battle_asset",
+  "battle_particle",
   "battle_sound",
   "animation_bind",
   "actor_interval_build",
@@ -652,6 +653,18 @@ const performanceBattleAssetStatuses = new Set([
   "cached",
   "lookup",
   "load",
+]);
+const performanceBattleParticleStages = new Set([
+  "model",
+  "config",
+  "warmup",
+]);
+const performanceBattleParticleStatuses = new Set([
+  "cold",
+  "cached",
+  "preserved",
+  "ready",
+  "error",
 ]);
 const performanceBattleSoundRequestStatuses = new Set([
   "first",
@@ -973,6 +986,23 @@ function sanitizePerformanceEvent(event) {
     copyEnum(sanitized, event, "state", performanceStates);
     if (
       !sanitized.kind ||
+      !sanitized.asset ||
+      !sanitized.status ||
+      sanitized.durationMs === undefined
+    ) return null;
+  } else if (event.type === "battle_particle") {
+    copyEnum(sanitized, event, "stage", performanceBattleParticleStages);
+    copyPerformanceToken(sanitized, event, "asset");
+    copyEnum(
+      sanitized,
+      event,
+      "status",
+      performanceBattleParticleStatuses,
+    );
+    copyNumber(sanitized, event, "durationMs", 0, 120_000);
+    copyEnum(sanitized, event, "state", performanceStates);
+    if (
+      !sanitized.stage ||
       !sanitized.asset ||
       !sanitized.status ||
       sanitized.durationMs === undefined
