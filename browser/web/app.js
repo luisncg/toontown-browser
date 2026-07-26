@@ -783,23 +783,25 @@ async function prepareBrowserGameServer() {
       throw new Error("The secure game connection could not be prepared");
     }
     const material = await response.json();
+    const expectedOfficialBuildId =
+      authority?.diagnostics()?.officialBuildId;
     if (
-      ![1, 2].includes(material?.version) ||
+      material?.version !== 3 ||
       typeof material.resume !== "string" ||
       !/^[A-Za-z0-9_-]{32,128}$/.test(material.resume) ||
       typeof material.lease !== "string" ||
       material.lease.length > 2_048 ||
-      !/^v1(?:\.[A-Za-z0-9_-]+){3}$/.test(material.lease) ||
+      !/^v2(?:\.[A-Za-z0-9_-]+){3}$/.test(material.lease) ||
       !Number.isFinite(material.expiresAt) ||
       material.expiresAt <= Date.now() ||
-      (
-        material.version === 2 &&
-        (
-          typeof material.authority !== "string" ||
-          !/^[a-f0-9]{32}$/.test(material.authority)
-        )
-      )
+      typeof material.authority !== "string" ||
+      !/^[a-f0-9]{32}$/.test(material.authority) ||
+      material.buildId !== runtimeAssetVersion ||
+      typeof material.officialBuildId !== "string" ||
+      !/^[a-f0-9]{32}$/.test(material.officialBuildId) ||
+      material.officialBuildId !== expectedOfficialBuildId
     ) {
+      authority?.failOfficialBuild("invalid-attestation");
       throw new Error("The secure game connection response was invalid");
     }
     const websocketProtocol =
@@ -812,6 +814,8 @@ async function prepareBrowserGameServer() {
     if (material.authority) {
       url.searchParams.set("authority", material.authority);
     }
+    url.searchParams.set("build", material.buildId);
+    url.searchParams.set("attestation", material.officialBuildId);
     return rememberBrowserGameServer(url.href);
   })().catch((error) => {
     browserGameServerPromise = undefined;
@@ -2872,17 +2876,37 @@ function loadTurnstileScript() {
 }
 
 async function startVerifiedRuntime() {
+  const authority = window.ToontownRuntimeAuthority;
+  if (authority?.isFatal()) return;
   try {
     const configResponse = await fetch("/api/bootstrap/config", {
       cache: "no-store",
       credentials: "same-origin",
+      headers: authority?.bootstrapHeaders(runtimeAssetVersion),
     });
+    if (!authority?.inspectOfficialResponse(
+      configResponse,
+      "invalid-build",
+    )) return;
     if (!configResponse.ok) throw new Error("Bootstrap configuration failed");
     const config = await configResponse.json();
-    window.ToontownRuntimeAuthority?.configure({
+    if (
+      config.buildId !== runtimeAssetVersion ||
+      config.officialOrigin !== window.location.origin ||
+      config.attestationRequired !== true ||
+      config.attestationProtocol !== 1
+    ) {
+      authority?.failOfficialBuild("invalid-build");
+      return;
+    }
+    if (authority?.configure({
       required: config.authorityRequired === true,
       release: config.release,
-    });
+      buildId: config.buildId,
+      officialOrigin: config.officialOrigin,
+      attestationRequired: config.attestationRequired,
+      attestationProtocol: config.attestationProtocol,
+    }) === false) return;
     if (
       config.authorityRequired === true &&
       config.release !== runtimeAssetVersion
@@ -2897,7 +2921,12 @@ async function startVerifiedRuntime() {
     const sessionResponse = await fetch("/api/bootstrap/session", {
       cache: "no-store",
       credentials: "same-origin",
+      headers: authority?.bootstrapHeaders(runtimeAssetVersion),
     });
+    if (!authority?.inspectOfficialResponse(
+      sessionResponse,
+      "invalid-build",
+    )) return;
     const session = sessionResponse.ok
       ? await sessionResponse.json()
       : { valid: false };
@@ -2933,9 +2962,16 @@ async function startVerifiedRuntime() {
           const response = await fetch("/api/bootstrap/verify", {
             method: "POST",
             credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...authority?.bootstrapHeaders(runtimeAssetVersion),
+            },
             body: JSON.stringify({ token }),
           });
+          if (!authority?.inspectOfficialResponse(
+            response,
+            "invalid-build",
+          )) return;
           if (!response.ok) throw new Error("Verification failed");
           const verification = await response.json();
           window.ToontownRuntimeAuthority?.primeChallenge(
@@ -2977,6 +3013,7 @@ async function startVerifiedRuntime() {
       },
     });
   } catch (error) {
+    if (authority?.isFatal()) return;
     if (String(error?.message ?? "").includes("secure game connection")) {
       showError("The secure game connection could not be prepared.");
     } else {

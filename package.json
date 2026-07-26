@@ -20,6 +20,7 @@
     "test:gateway-bootstrap": "node ./browser/tests/gateway_bootstrap_session.mjs",
     "test:gateway-lease": "node ./browser/tests/gateway_lease.mjs",
     "test:runtime-authority": "node ./browser/tests/runtime_authority.mjs",
+    "test:official-build-guard": ".build-wasm/playwright-venv/bin/python browser/tests/smoke_official_build_guard.py",
     "test:game-authority": "node ./browser/tests/game_authority.mjs",
     "test:game-authority-python": "python3 -m unittest browser.tests.test_game_authority_python",
     "test:game-authority-manager": "PYTHONPATH=.toolchain/build/panda3d-native-server:. python3.12 -m unittest browser.tests.test_game_authority_manager",

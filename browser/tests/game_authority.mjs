@@ -13,12 +13,14 @@ import {
 const secret = Buffer.alloc(32, 7).toString("base64url");
 const release = "a".repeat(64);
 const thumbprint = "b".repeat(64);
+const officialBuildId = "c".repeat(32);
 const now = 1_800_000_000_000;
 
 const initial = createGameSessionState({
   secret,
   release,
   thumbprint,
+  officialBuildId,
   now,
 });
 const state = verifyGameSessionState({
@@ -26,16 +28,19 @@ const state = verifyGameSessionState({
   stateToken: initial.stateToken,
   release,
   thumbprint,
+  officialBuildId,
   now,
 });
 assert.equal(state.sq, 0);
 assert.equal(state.st.length, 32);
+assert.equal(state.ob, officialBuildId);
 
 const issued = createGameTransitionCapability({
   secret,
   stateToken: initial.stateToken,
   release,
   thumbprint,
+  officialBuildId,
   action: "battle.attack",
   target: { battle: 42, track: 4, level: 0, target: 99 },
   now,
@@ -44,6 +49,7 @@ const transition = verifyGameTransitionCapability({
   secret,
   capability: issued.capability,
   release,
+  officialBuildId,
   action: "battle.attack",
   target: { battle: 42, track: 4, level: 0, target: 99 },
   now,
@@ -55,6 +61,7 @@ assert.equal(
     secret,
     capability: issued.capability,
     release,
+    officialBuildId,
     action: "battle.attack",
     target: { battle: 42, track: 5, level: 0, target: 99 },
     now,
@@ -68,6 +75,7 @@ const nextState = verifyGameSessionState({
   stateToken: advanced.stateToken,
   release,
   thumbprint,
+  officialBuildId,
   now,
 });
 assert.equal(nextState.st, transition.ns);
@@ -110,6 +118,7 @@ const featureModule = createSignedFeatureModule({
   stateToken: initial.stateToken,
   release,
   thumbprint,
+  officialBuildId,
   moduleId: "custom-features-v1",
   module: { version: 1, authority: "ai" },
   now,
@@ -121,6 +130,7 @@ assert.ok(verifySignedFeatureModule({
   module: featureModule.module,
   release,
   thumbprint,
+  officialBuildId,
   now,
 }));
 assert.equal(verifySignedFeatureModule({
@@ -130,6 +140,7 @@ assert.equal(verifySignedFeatureModule({
   module: { version: 1, authority: "client" },
   release,
   thumbprint,
+  officialBuildId,
   now,
 }), null);
 
@@ -139,6 +150,7 @@ assert.equal(
     stateToken: initial.stateToken,
     release,
     thumbprint,
+    officialBuildId,
     now,
   }),
   null,

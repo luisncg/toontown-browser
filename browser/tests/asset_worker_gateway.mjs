@@ -14,6 +14,7 @@ const session = createHash("sha256")
   .slice(0, 32);
 const release = "a".repeat(64);
 const authority = "c".repeat(32);
+const officialBuild = "d".repeat(32);
 const now = Math.floor(Date.now() / 1_000);
 const calls = [];
 const objectBytes = new TextEncoder().encode("private-r2-object").byteLength;
@@ -106,6 +107,10 @@ function request(
     method = "GET",
     cookie = bootstrapCookie,
     authorityHeader = authority,
+    buildHeader = release,
+    officialBuildHeader = officialBuild,
+    originHeader = "",
+    fetchSite = "",
   } = {},
 ) {
   return new Request(`${origin}/assets/${token}`, {
@@ -118,6 +123,12 @@ function request(
       ...(authorityHeader
         ? { "X-Toontown-Asset-Authority": authorityHeader }
         : {}),
+      ...(buildHeader ? { "X-Toontown-Build": buildHeader } : {}),
+      ...(officialBuildHeader
+        ? { "X-Toontown-Official-Build-Id": officialBuildHeader }
+        : {}),
+      ...(originHeader ? { Origin: originHeader } : {}),
+      ...(fetchSite ? { "Sec-Fetch-Site": fetchSite } : {}),
     },
   });
 }
@@ -125,11 +136,13 @@ function request(
 async function ticket(overrides = {}) {
   return sealAssetTicket(
     {
-      version: 2,
+      version: 3,
       expiresAt: now + 180,
       method: "GET",
       session,
       authority,
+      build: release,
+      officialBuild,
       objectKey: `releases/${release}/open-toontown.data.gz`,
       name: "open-toontown.data",
       contentType: "application/octet-stream",
@@ -173,6 +186,38 @@ assert.equal(
   (
     await worker.fetch(
       request(validToken, { authorityHeader: "d".repeat(32) }),
+      environment,
+    )
+  ).status,
+  403,
+);
+const missingBuild = await worker.fetch(
+  request(validToken, { buildHeader: "" }),
+  environment,
+);
+assert.equal(missingBuild.status, 403);
+assert.equal(missingBuild.headers.get("x-toontown-official-error"), "1");
+assert.deepEqual(await missingBuild.json(), {
+  error: "OFFICIAL_ORIGIN_REQUIRED",
+  officialUrl: "https://toontown.lui.ss/",
+});
+const foreignOrigin = await worker.fetch(
+  request(validToken, {
+    originHeader: "https://unofficial.example",
+    fetchSite: "cross-site",
+  }),
+  environment,
+);
+assert.equal(foreignOrigin.status, 403);
+assert.equal(foreignOrigin.headers.get("x-toontown-official-error"), "1");
+assert.deepEqual(await foreignOrigin.json(), {
+  error: "OFFICIAL_ORIGIN_REQUIRED",
+  officialUrl: "https://toontown.lui.ss/",
+});
+assert.equal(
+  (
+    await worker.fetch(
+      request(validToken, { officialBuildHeader: "e".repeat(32) }),
       environment,
     )
   ).status,

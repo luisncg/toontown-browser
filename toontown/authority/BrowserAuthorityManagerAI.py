@@ -231,7 +231,8 @@ class BrowserAuthorityManagerAI(DistributedObjectAI):
             transition['ps'] == state['st'] and
             transition['sq'] == state['sq'] + 1 and
             transition['ce'] == state['ce'] and
-            transition['m'] == state['m'])
+            transition['m'] == state['m'] and
+            transition['ob'] == state['ob'])
 
     def _reject(self, avId, requestId, reason, message):
         if avId:

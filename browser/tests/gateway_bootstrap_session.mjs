@@ -37,9 +37,12 @@ const gateway = createGateway({
 await once(gateway, "listening");
 const resumeToken = createGatewayResumeToken();
 const authorityKey = "d".repeat(32);
+const buildId = "e".repeat(64);
+const officialBuildId = "f".repeat(32);
 const url =
   `ws://127.0.0.1:${gateway.address().port}/astron?resume=${resumeToken}` +
-  `&authority=${authorityKey}`;
+  `&authority=${authorityKey}&build=${buildId}` +
+  `&attestation=${officialBuildId}`;
 
 const rejected = new WebSocket(url, {
   origin,
@@ -59,6 +62,8 @@ const lease = createGatewayLease({
   userAgent,
   origin,
   authorityKey,
+  buildId,
+  officialBuildId,
 });
 
 const missingLease = new WebSocket(url, {
@@ -69,7 +74,7 @@ const [, missingLeaseResponse] = await once(
   missingLease,
   "unexpected-response",
 );
-assert.equal(missingLeaseResponse.statusCode, 401);
+assert.equal(missingLeaseResponse.statusCode, 403);
 missingLeaseResponse.resume();
 
 const alteredResume = createGatewayResumeToken();
@@ -84,7 +89,7 @@ const [, mismatchedLeaseResponse] = await once(
   mismatchedLease,
   "unexpected-response",
 );
-assert.equal(mismatchedLeaseResponse.statusCode, 401);
+assert.equal(mismatchedLeaseResponse.statusCode, 403);
 mismatchedLeaseResponse.resume();
 
 const accepted = new WebSocket(`${url}&lease=${lease}`, {

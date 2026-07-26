@@ -12,20 +12,24 @@ private Cloudflare R2 bucket `toontown-browser-assets`.
 4. During the ordinary boot, the browser creates a non-extractable ECDSA key
    and exchanges a server-bound challenge for a short-lived runtime
    authorization tied to the current immutable release.
-5. The browser signs one batched asset-ticket request. The signature covers the
+5. The origin also mints an official-build attestation bound to that release,
+   bootstrap session, exact public origin, browser context, and proof-of-
+   possession key. The attestation identifier is chained into every protected
+   request and every asset ticket.
+6. The browser signs one batched asset-ticket request. The signature covers the
    exact body, request path, timestamp, one-use nonce, and authorization id.
-6. Requests for the main `.wasm`, initial `.data`, and phase `.data` files are
+7. Requests for the main `.wasm`, initial `.data`, and phase `.data` files are
    checked against a private manifest stored outside the served web root.
    Direct heavy-asset paths are rejected even for a verified bootstrap cookie.
-7. The dedicated server returns three-minute, AES-GCM-encrypted,
-   session-and-authority-bound opaque ticket URLs. Tickets do not reveal asset
-   names, release hashes, or R2 object keys.
-8. A Cloudflare Worker verifies the signed bootstrap cookie, ticket session,
-   and matching authority header, validates the exact object path, and streams
-   the private R2 object through `toontown.lui.ss/assets/*`. The browser never
-   receives R2 credentials, an R2 hostname, a presigned S3 URL, or the private
-   manifest.
-9. The browser encrypts completed heavy responses into 4 MiB AES-GCM chunks in
+8. The dedicated server returns three-minute, AES-GCM-encrypted,
+   session-, authority-, release-, and attestation-bound opaque ticket URLs.
+   Tickets do not reveal asset names, release hashes, or R2 object keys.
+9. A Cloudflare Worker verifies the signed bootstrap cookie, ticket session,
+   release, official-build attestation, browser origin headers, and matching
+   authority header, validates the exact object path, and streams the private
+   R2 object through `toontown.lui.ss/assets/*`. The browser never receives R2
+   credentials, an R2 hostname, a presigned S3 URL, or the private manifest.
+10. The browser encrypts completed heavy responses into 4 MiB AES-GCM chunks in
    IndexedDB. Its device key is non-extractable. Old plaintext Emscripten and
    phase caches are removed; if WebCrypto or IndexedDB is unavailable, the
    client uses the network rather than storing plaintext.
@@ -34,6 +38,13 @@ These layers prevent anonymous bulk fetching and make casual cache copying and
 asset enumeration materially harder. They cannot make a playable browser
 client impossible to capture: a verified player controls a browser that must
 eventually decrypt and render the bytes.
+
+Requests from a mismatched release, wrong origin, embedded copy, or missing
+official-build attestation receive `403 OFFICIAL_ORIGIN_REQUIRED`. The official
+client turns that response into a non-dismissible full-canvas warning pointing
+players to `https://toontown.lui.ss/`. This blocks unmodified copies and lazy
+repackages from the production backend; it is not a claim that an active
+attacker cannot rewrite client JavaScript or proxy HTTP headers.
 
 Private asset access is independent from gameplay transport authorization.
 After browser verification, the web origin separately issues an opaque

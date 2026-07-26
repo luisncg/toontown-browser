@@ -2,12 +2,14 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   createPublicKey,
   randomBytes,
   verify as verifySignature,
 } from "node:crypto";
 
-export const RUNTIME_AUTHORITY_PROTOCOL = 1;
+export const RUNTIME_AUTHORITY_PROTOCOL = 2;
+export const OFFICIAL_BUILD_ATTESTATION_PROTOCOL = 1;
 export const DEFAULT_RUNTIME_CHALLENGE_TTL_SECONDS = 2 * 60;
 export const DEFAULT_RUNTIME_AUTHORIZATION_TTL_SECONDS = 30 * 60;
 export const MAX_RUNTIME_AUTHORIZATION_TTL_SECONDS = 60 * 60;
@@ -15,16 +17,20 @@ export const RUNTIME_PROOF_CLOCK_SKEW_SECONDS = 60;
 
 const TOKEN_SPECS = Object.freeze({
   challenge: Object.freeze({
-    prefix: "rc1",
-    aad: Buffer.from("toontown-browser-runtime-challenge-v1", "utf8"),
+    prefix: "rc2",
+    aad: Buffer.from("toontown-browser-runtime-challenge-v2", "utf8"),
   }),
   authorization: Object.freeze({
-    prefix: "ra1",
-    aad: Buffer.from("toontown-browser-runtime-authorization-v1", "utf8"),
+    prefix: "ra2",
+    aad: Buffer.from("toontown-browser-runtime-authorization-v2", "utf8"),
+  }),
+  official: Object.freeze({
+    prefix: "ob1",
+    aad: Buffer.from("toontown-browser-official-build-attestation-v1", "utf8"),
   }),
   world: Object.freeze({
-    prefix: "rw1",
-    aad: Buffer.from("toontown-browser-world-capability-v1", "utf8"),
+    prefix: "rw2",
+    aad: Buffer.from("toontown-browser-world-capability-v2", "utf8"),
   }),
 });
 const SESSION_PATTERN = /^[a-f0-9]{32}$/;
@@ -238,7 +244,7 @@ export function runtimeRegistrationMessage({
   }
   return Buffer.from(
     [
-      "toontown-browser-runtime-registration-v1",
+      "toontown-browser-runtime-registration-v2",
       challenge,
       release,
       normalizeOrigin(origin),
@@ -379,8 +385,132 @@ export function runtimeAuthorizationId(authorization) {
   return digest(authorization).slice(0, 32);
 }
 
+function officialBuildAttestationId(secret, context, thumbprint) {
+  const expected = requireContext(context);
+  if (!RELEASE_PATTERN.test(thumbprint ?? "")) {
+    throw new Error("A valid runtime key thumbprint is required");
+  }
+  return createHmac("sha256", decodeSecret(secret))
+    .update("toontown-browser-official-build-id-v1\n", "utf8")
+    .update([
+      expected.s,
+      expected.r,
+      expected.ip,
+      expected.ua,
+      expected.o,
+      thumbprint,
+    ].join("\n"), "utf8")
+    .digest("hex")
+    .slice(0, 32);
+}
+
+export function createOfficialBuildAttestation({
+  secret,
+  authorizationId,
+  thumbprint,
+  now = Date.now(),
+  ttlSeconds = DEFAULT_RUNTIME_AUTHORIZATION_TTL_SECONDS,
+  ...context
+}) {
+  if (!SESSION_PATTERN.test(authorizationId ?? "")) {
+    throw new Error("A valid runtime authorization id is required");
+  }
+  if (!RELEASE_PATTERN.test(thumbprint ?? "")) {
+    throw new Error("A valid runtime key thumbprint is required");
+  }
+  if (
+    !Number.isInteger(ttlSeconds) ||
+    ttlSeconds < 5 * 60 ||
+    ttlSeconds > MAX_RUNTIME_AUTHORIZATION_TTL_SECONDS
+  ) {
+    throw new Error(
+      `Official build attestation TTL must be 300-${MAX_RUNTIME_AUTHORIZATION_TTL_SECONDS} seconds`,
+    );
+  }
+  const issuedAt = Math.floor(now / 1_000);
+  const attestationId = officialBuildAttestationId(
+    secret,
+    context,
+    thumbprint,
+  );
+  const payload = {
+    v: OFFICIAL_BUILD_ATTESTATION_PROTOCOL,
+    t: "official-build",
+    iat: issuedAt,
+    exp: issuedAt + ttlSeconds,
+    n: randomBytes(16).toString("base64url"),
+    id: attestationId,
+    b: context.release,
+    a: authorizationId,
+    p: thumbprint,
+    ...requireContext(context),
+  };
+  return Object.freeze({
+    version: OFFICIAL_BUILD_ATTESTATION_PROTOCOL,
+    buildId: context.release,
+    attestation: sealToken("official", payload, secret),
+    attestationId,
+    expiresAt: payload.exp * 1_000,
+  });
+}
+
+export function verifyOfficialBuildAttestation({
+  secret,
+  attestation,
+  attestationId,
+  authorizationId,
+  thumbprint,
+  context,
+  now = Date.now(),
+}) {
+  try {
+    if (
+      !SESSION_PATTERN.test(attestationId ?? "") ||
+      !SESSION_PATTERN.test(authorizationId ?? "") ||
+      !RELEASE_PATTERN.test(thumbprint ?? "")
+    ) {
+      return null;
+    }
+    const payload = openToken("official", attestation, secret);
+    const expectedId = officialBuildAttestationId(
+      secret,
+      context,
+      thumbprint,
+    );
+    if (
+      payload?.v !== OFFICIAL_BUILD_ATTESTATION_PROTOCOL ||
+      payload?.t !== "official-build" ||
+      !validLifetime(
+        payload,
+        now,
+        MAX_RUNTIME_AUTHORIZATION_TTL_SECONDS,
+      ) ||
+      !NONCE_PATTERN.test(payload.n ?? "") ||
+      payload.id !== expectedId ||
+      payload.id !== attestationId ||
+      payload.b !== context.release ||
+      payload.a !== authorizationId ||
+      payload.p !== thumbprint ||
+      !contextMatches(payload, context)
+    ) {
+      return null;
+    }
+    return Object.freeze({
+      version: payload.v,
+      buildId: payload.b,
+      attestationId: payload.id,
+      authorizationId: payload.a,
+      thumbprint: payload.p,
+      expiresAt: payload.exp * 1_000,
+    });
+  } catch {
+    return null;
+  }
+}
+
 export function runtimeRequestMessage({
   authorizationId,
+  officialBuildId,
   method,
   pathname,
   timestamp,
@@ -389,6 +519,9 @@ export function runtimeRequestMessage({
 }) {
   if (!SESSION_PATTERN.test(authorizationId ?? "")) {
     throw new Error("Runtime authorization id is invalid");
+  }
+  if (!SESSION_PATTERN.test(officialBuildId ?? "")) {
+    throw new Error("Official build attestation id is invalid");
   }
   if (!["GET", "POST"].includes(method)) {
     throw new Error("Runtime proof method is invalid");
@@ -407,13 +540,14 @@ export function runtimeRequestMessage({
   }
   const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body ?? "");
   return Buffer.from([
-    "toontown-browser-request-proof-v1",
+    "toontown-browser-request-proof-v2",
     method,
     pathname,
     String(timestamp),
     nonce,
     digest(bytes),
     authorizationId,
+    officialBuildId,
   ].join("\n"), "utf8");
 }
 
@@ -426,6 +560,7 @@ export function verifyRuntimeRequestProof({
   method,
   pathname,
   body,
+  officialBuildId,
   context,
   now = Date.now(),
 }) {
@@ -434,7 +569,8 @@ export function verifyRuntimeRequestProof({
       typeof signature !== "string" ||
       !SIGNATURE_PATTERN.test(signature) ||
       !PROOF_TIMESTAMP_PATTERN.test(String(timestamp ?? "")) ||
-      !NONCE_PATTERN.test(nonce ?? "")
+      !NONCE_PATTERN.test(nonce ?? "") ||
+      !SESSION_PATTERN.test(officialBuildId ?? "")
     ) {
       return null;
     }
@@ -477,6 +613,7 @@ export function verifyRuntimeRequestProof({
         timestamp: requestedAt,
         nonce,
         body,
+        officialBuildId,
       }),
       {
         key: createPublicKey({ key: publicKey, format: "jwk" }),
@@ -489,6 +626,7 @@ export function verifyRuntimeRequestProof({
       authorizationId,
       thumbprint: payload.p,
       release: payload.r,
+      officialBuildId,
       expiresAt: payload.exp * 1_000,
       replayKey: `${authorizationId}:${nonce}`,
     });
@@ -500,6 +638,7 @@ export function verifyRuntimeRequestProof({
 export function createWorldCapability({
   secret,
   authorizationId,
+  officialBuildId,
   zoneId,
   requiredPhases,
   contentEpoch,
@@ -511,6 +650,9 @@ export function createWorldCapability({
 }) {
   if (!SESSION_PATTERN.test(authorizationId ?? "")) {
     throw new Error("A valid runtime authorization id is required");
+  }
+  if (!SESSION_PATTERN.test(officialBuildId ?? "")) {
+    throw new Error("A valid official build attestation id is required");
   }
   if (!Number.isSafeInteger(zoneId) || zoneId < 0 || zoneId > 99_999_999) {
     throw new Error("A valid world zone is required");
@@ -550,6 +692,7 @@ export function createWorldCapability({
     exp: issuedAt + ttlSeconds,
     n: randomBytes(16).toString("base64url"),
     a: authorizationId,
+    ob: officialBuildId,
     z: zoneId,
     ph: phases,
     ce: contentEpoch,
@@ -560,6 +703,7 @@ export function createWorldCapability({
   return Object.freeze({
     version: RUNTIME_AUTHORITY_PROTOCOL,
     release: context.release,
+    officialBuildId,
     zoneId,
     requiredPhases: Object.freeze(phases),
     contentEpoch,

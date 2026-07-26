@@ -5,14 +5,14 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
-export const GAME_AUTHORITY_PROTOCOL = 1;
-export const GAME_CONTENT_EPOCH = "gameplay-v1";
+export const GAME_AUTHORITY_PROTOCOL = 2;
+export const GAME_CONTENT_EPOCH = "gameplay-v2";
 export const GAME_STATE_TTL_SECONDS = 6 * 60 * 60;
 export const GAME_TRANSITION_TTL_SECONDS = 45;
 
-const STATE_PREFIX = "gs1";
-const TRANSITION_PREFIX = "gt1";
-const FEATURE_PREFIX = "gf1";
+const STATE_PREFIX = "gs2";
+const TRANSITION_PREFIX = "gt2";
+const FEATURE_PREFIX = "gf2";
 const SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const HEX_32_PATTERN = /^[a-f0-9]{32}$/;
 const HEX_64_PATTERN = /^[a-f0-9]{64}$/;
@@ -229,6 +229,7 @@ function validStatePayload(payload, {
   now,
   release,
   thumbprint,
+  officialBuildId,
 } = {}) {
   return (
     payload?.v === GAME_AUTHORITY_PROTOCOL &&
@@ -237,6 +238,7 @@ function validStatePayload(payload, {
     HEX_64_PATTERN.test(payload.r ?? "") &&
     HEX_32_PATTERN.test(payload.sid ?? "") &&
     HEX_32_PATTERN.test(payload.st ?? "") &&
+    HEX_32_PATTERN.test(payload.ob ?? "") &&
     MARKER_PATTERN.test(payload.m ?? "") &&
     typeof payload.ce === "string" &&
     /^[a-z0-9][a-z0-9_.-]{0,63}$/.test(payload.ce) &&
@@ -244,7 +246,8 @@ function validStatePayload(payload, {
     payload.sq >= 0 &&
     validLifetime(payload, now, GAME_STATE_TTL_SECONDS) &&
     (!release || payload.r === release) &&
-    (!thumbprint || payload.pk === thumbprint)
+    (!thumbprint || payload.pk === thumbprint) &&
+    (!officialBuildId || payload.ob === officialBuildId)
   );
 }
 
@@ -252,6 +255,7 @@ export function createGameSessionState({
   secret,
   release,
   thumbprint,
+  officialBuildId,
   now = Date.now(),
   ttlSeconds = GAME_STATE_TTL_SECONDS,
 }) {
@@ -260,6 +264,9 @@ export function createGameSessionState({
   }
   if (!HEX_64_PATTERN.test(thumbprint ?? "")) {
     throw new Error("A valid runtime key thumbprint is required");
+  }
+  if (!HEX_32_PATTERN.test(officialBuildId ?? "")) {
+    throw new Error("A valid official build attestation id is required");
   }
   if (
     !Number.isInteger(ttlSeconds) ||
@@ -276,6 +283,7 @@ export function createGameSessionState({
     r: release,
     sid: randomBytes(16).toString("hex"),
     st: randomBytes(16).toString("hex"),
+    ob: officialBuildId,
     sq: 0,
     ce: GAME_CONTENT_EPOCH,
     m: randomBytes(16).toString("base64url"),
@@ -287,6 +295,7 @@ export function createGameSessionState({
     release,
     contentEpoch: payload.ce,
     marker: payload.m,
+    officialBuildId,
     sequence: payload.sq,
     stateToken: seal(STATE_PREFIX, payload, secret),
     expiresAt: payload.exp * 1_000,
@@ -298,11 +307,17 @@ export function verifyGameSessionState({
   stateToken,
   release,
   thumbprint,
+  officialBuildId,
   now = Date.now(),
 }) {
   try {
     const payload = open(STATE_PREFIX, stateToken, secret);
-    return validStatePayload(payload, { now, release, thumbprint })
+    return validStatePayload(payload, {
+      now,
+      release,
+      thumbprint,
+      officialBuildId,
+    })
       ? Object.freeze({ ...payload })
       : null;
   } catch {
@@ -315,6 +330,7 @@ export function createGameTransitionCapability({
   stateToken,
   release,
   thumbprint,
+  officialBuildId,
   action,
   target,
   now = Date.now(),
@@ -325,6 +341,7 @@ export function createGameTransitionCapability({
     stateToken,
     release,
     thumbprint,
+    officialBuildId,
     now,
   });
   if (!state) throw new Error("Game session state is invalid");
@@ -349,6 +366,7 @@ export function createGameTransitionCapability({
     sq: state.sq + 1,
     ce: state.ce,
     m: state.m,
+    ob: state.ob,
     a: action,
     x: normalizedTarget,
     n: randomBytes(16).toString("base64url"),
@@ -362,6 +380,7 @@ export function createGameTransitionCapability({
     target: normalizedTarget,
     sequence: payload.sq,
     marker: state.m,
+    officialBuildId: state.ob,
     capability: seal(TRANSITION_PREFIX, payload, secret),
     expiresAt: payload.exp * 1_000,
   });
@@ -371,6 +390,7 @@ export function verifyGameTransitionCapability({
   secret,
   capability,
   release,
+  officialBuildId,
   action,
   target,
   now = Date.now(),
@@ -389,6 +409,7 @@ export function verifyGameTransitionCapability({
       HEX_32_PATTERN.test(payload.sid ?? "") &&
       HEX_32_PATTERN.test(payload.ps ?? "") &&
       HEX_32_PATTERN.test(payload.ns ?? "") &&
+      HEX_32_PATTERN.test(payload.ob ?? "") &&
       MARKER_PATTERN.test(payload.m ?? "") &&
       MARKER_PATTERN.test(payload.n ?? "") &&
       Number.isSafeInteger(payload.sq) &&
@@ -397,6 +418,7 @@ export function verifyGameTransitionCapability({
       JSON.stringify(payload.x) === JSON.stringify(normalized) &&
       validLifetime(payload, now, 2 * 60) &&
       (!release || payload.r === release)
+      && (!officialBuildId || payload.ob === officialBuildId)
     );
     return valid ? Object.freeze({ ...payload, x: normalized }) : null;
   } catch {
@@ -428,6 +450,7 @@ export function advanceGameSessionState({
     sq: transition.sq,
     ce: transition.ce,
     m: transition.m,
+    ob: transition.ob,
     iat: issuedAt,
     exp: issuedAt + ttlSeconds,
   };
@@ -447,6 +470,7 @@ export function advanceGameSessionState({
     release: transition.r,
     contentEpoch: transition.ce,
     marker: transition.m,
+    officialBuildId: transition.ob,
     sequence: transition.sq,
     stateToken,
     receipt: Object.freeze({
@@ -464,6 +488,7 @@ export function createSignedFeatureModule({
   stateToken,
   release,
   thumbprint,
+  officialBuildId,
   moduleId,
   module,
   now = Date.now(),
@@ -474,6 +499,7 @@ export function createSignedFeatureModule({
     stateToken,
     release,
     thumbprint,
+    officialBuildId,
     now,
   });
   if (!state) throw new Error("Game session state is invalid");
@@ -504,6 +530,7 @@ export function createSignedFeatureModule({
     sq: state.sq,
     ce: state.ce,
     m: state.m,
+    ob: state.ob,
     id: moduleId,
     d: moduleDigest,
     iat: issuedAt,
@@ -514,6 +541,7 @@ export function createSignedFeatureModule({
     release: state.r,
     contentEpoch: state.ce,
     marker: state.m,
+    officialBuildId: state.ob,
     moduleId,
     moduleDigest,
     module,
@@ -529,6 +557,7 @@ export function verifySignedFeatureModule({
   module,
   release,
   thumbprint,
+  officialBuildId,
   now = Date.now(),
 }) {
   try {
@@ -543,6 +572,7 @@ export function verifySignedFeatureModule({
       HEX_64_PATTERN.test(payload.r ?? "") &&
       HEX_32_PATTERN.test(payload.sid ?? "") &&
       HEX_32_PATTERN.test(payload.st ?? "") &&
+      HEX_32_PATTERN.test(payload.ob ?? "") &&
       MARKER_PATTERN.test(payload.m ?? "") &&
       Number.isSafeInteger(payload.sq) &&
       payload.sq >= 0 &&
@@ -550,7 +580,8 @@ export function verifySignedFeatureModule({
       payload.d === moduleDigest &&
       validLifetime(payload, now, 1800) &&
       (!release || payload.r === release) &&
-      (!thumbprint || payload.pk === thumbprint)
+      (!thumbprint || payload.pk === thumbprint) &&
+      (!officialBuildId || payload.ob === officialBuildId)
     );
     return valid ? Object.freeze({ ...payload }) : null;
   } catch {

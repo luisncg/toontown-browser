@@ -15,28 +15,44 @@ browser-delivered bytes cannot be copied.
 4. The browser signs that challenge. The origin verifies it and returns a
    short-lived encrypted runtime authorization containing the public-key
    thumbprint and the same release/context bindings.
-5. The verified browser signs a same-origin
+5. The origin mints a short-lived official-build attestation bound to the
+   immutable release, bootstrap session, exact public origin, browser context,
+   and the same proof-of-possession key. Its identifier is included in every
+   protected request proof and every downstream capability.
+6. The verified browser signs a same-origin
    `POST /api/gateway/lease`. The signature covers the exact method, path, body,
-   timestamp, one-use nonce, and runtime-authorization id.
-6. The origin generates the resume token; the browser does not choose it.
-7. The origin encrypts an authenticated five-minute lease containing:
+   timestamp, one-use nonce, runtime-authorization id, and official-build
+   attestation id.
+7. The origin generates the resume token; the browser does not choose it.
+8. The origin encrypts an authenticated five-minute lease containing:
    - bootstrap-session digest;
    - runtime-authorization digest;
+   - official-build attestation digest;
+   - immutable release id;
    - resume token;
    - client-address digest;
    - User-Agent digest;
    - exact public origin;
    - issued/expiry times and a random nonce.
-8. The browser passes the opaque lease, authority digest, and resume token to
-   `/astron`.
-9. The loopback gateway independently validates every field before opening a
-   loopback TCP connection to Astron.
+9. The browser passes the opaque lease, authority digest, official-build
+   attestation digest, and resume token to `/astron`.
+10. The loopback gateway independently validates every field before opening a
+    loopback TCP connection to Astron.
 
 Changing the token, browser, address, origin, session, ciphertext, tag, or
 expiry rejects the socket. Copying an old client also fails when its embedded
 runtime release no longer matches the server's current release. Server signing
 keys exist only in
 `/etc/toontown-browser/environment`.
+
+Bootstrap, asset tickets, gateway leases, and gameplay capabilities all require
+the same official-build attestation chain. A wrong origin, embedded client,
+mismatched release, or missing/invalid attestation receives the consistent
+`403 OFFICIAL_ORIGIN_REQUIRED` response. The official client displays a
+non-dismissible full-canvas warning that points the player back to
+`https://toontown.lui.ss/`, while the backend remains unavailable to that copy.
+Telemetry records only bounded reason/build categories and never stores raw
+attestation material, account credentials, or proof-of-possession keys.
 
 The authority registration runs in parallel with runtime/cache preparation.
 It is completed during boot and reused by Pick-a-Toon, so it does not add a

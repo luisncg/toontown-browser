@@ -41,12 +41,14 @@ class GameAuthorityManagerTests(unittest.TestCase):
             secret: process.env.TEST_SECRET,
             release: "a".repeat(64),
             thumbprint: "b".repeat(64),
+            officialBuildId: "c".repeat(32),
           });
           const transition = createGameTransitionCapability({
             secret: process.env.TEST_SECRET,
             stateToken: state.stateToken,
             release: "a".repeat(64),
             thumbprint: "b".repeat(64),
+            officialBuildId: "c".repeat(32),
             action: "fish-bingo.claim",
             target: {manager: 501, card: 7},
           });

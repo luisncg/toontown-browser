@@ -31,6 +31,7 @@ const DEFAULT_BROWSER_RESUME_GRACE_MS = 5 * 60_000;
 const DEFAULT_ASTRON_HEARTBEAT_INTERVAL_MS = 10_000;
 const RESUME_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const AUTHORITY_KEY_PATTERN = /^[a-f0-9]{32}$/;
+const BUILD_ID_PATTERN = /^[a-f0-9]{64}$/;
 const VISIBILITY_HIDDEN = "toontown:visibility:hidden";
 const VISIBILITY_VISIBLE = "toontown:visibility:visible";
 const CLIENT_HELLO = 1;
@@ -43,6 +44,21 @@ function rejectUpgrade(socket, status, message) {
     `HTTP/1.1 ${status}\r\n` +
     "Connection: close\r\n" +
     "Content-Type: text/plain; charset=utf-8\r\n" +
+    `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+  );
+}
+
+function rejectOfficialUpgrade(socket) {
+  const body = `${JSON.stringify({
+    error: "OFFICIAL_ORIGIN_REQUIRED",
+    officialUrl: "https://toontown.lui.ss/",
+  })}\n`;
+  socket.end(
+    "HTTP/1.1 403 Forbidden\r\n" +
+    "Connection: close\r\n" +
+    "Content-Type: application/json; charset=utf-8\r\n" +
+    "Cache-Control: private, no-store\r\n" +
+    "X-Toontown-Official-Error: 1\r\n" +
     `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
   );
 }
@@ -255,6 +271,9 @@ export function createGateway({
 
     const resumeToken = requestUrl.searchParams.get("resume") ?? "";
     const authorityKey = requestUrl.searchParams.get("authority") ?? "";
+    const buildId = requestUrl.searchParams.get("build") ?? "";
+    const officialBuildId =
+      requestUrl.searchParams.get("attestation") ?? "";
     const reconnect = requestUrl.searchParams.get("reconnect") === "1";
     if (!RESUME_TOKEN_PATTERN.test(resumeToken)) {
       rejectGatewayUpgrade(
@@ -276,16 +295,24 @@ export function createGateway({
       );
       return;
     }
+    if (
+      requireGatewayLease &&
+      (
+        !BUILD_ID_PATTERN.test(buildId) ||
+        !AUTHORITY_KEY_PATTERN.test(officialBuildId)
+      )
+    ) {
+      console.warn(`[GatewayReject] ${JSON.stringify({
+        reason: "invalid_official_build",
+        status: 403,
+      })}`);
+      rejectOfficialUpgrade(socket);
+      return;
+    }
 
     const origin = request.headers.origin;
     if (!origin || !originSet.has(origin)) {
-      rejectGatewayUpgrade(
-        request,
-        socket,
-        "403 Forbidden",
-        "Origin is not allowed",
-        "origin_not_allowed",
-      );
+      rejectOfficialUpgrade(socket);
       return;
     }
     if (
@@ -327,6 +354,8 @@ export function createGateway({
         userAgent,
         origin,
         authorityKey,
+        buildId,
+        officialBuildId,
       })
       : null;
     if (requireBootstrapSession && !reconnectIdentity) {
@@ -386,16 +415,16 @@ export function createGateway({
           userAgent,
           origin,
           authorityKey,
+          buildId,
+          officialBuildId,
         },
       )
     ) {
-      rejectGatewayUpgrade(
-        request,
-        socket,
-        "401 Unauthorized",
-        "Gateway lease is required",
-        "invalid_lease",
-      );
+      console.warn(`[GatewayReject] ${JSON.stringify({
+        reason: "invalid_official_lease",
+        status: 403,
+      })}`);
+      rejectOfficialUpgrade(socket);
       return;
     }
 
@@ -775,7 +804,10 @@ export function createGateway({
             candidate.sessionKey === reconnectIdentity.sessionKey &&
             candidate.userAgentDigest === reconnectIdentity.userAgentDigest &&
             candidate.origin === reconnectIdentity.origin &&
-            candidate.authorityKey === reconnectIdentity.authorityKey
+            candidate.authorityKey === reconnectIdentity.authorityKey &&
+            candidate.buildId === reconnectIdentity.buildId &&
+            candidate.officialBuildId ===
+              reconnectIdentity.officialBuildId
       ),
       close: () => finalize(1001, "Gateway is shutting down", "shutdown"),
     };

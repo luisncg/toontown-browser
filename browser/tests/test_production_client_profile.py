@@ -90,6 +90,11 @@ class ProductionClientProfileTests(unittest.TestCase):
                 'signedRequest("/api/gateway/lease", {})',
                 app,
             )
+            self.assertIn("config.attestationRequired !== true", app)
+            self.assertIn("config.attestationProtocol !== 1", app)
+            self.assertIn("function failOfficialBuild", authority)
+            self.assertIn("X-Toontown-Official-Build", authority)
+            self.assertIn("toontown-browser-request-proof-v2", authority)
             self.assertIn("LOCAL_ASTRON_DEVELOPMENT = False", browser_game)
             self.assertIn('DEFAULT_BROWSER_GAME_SERVER = ""', browser_game)
             self.assertNotIn(LOCAL_ENDPOINT, browser_game)

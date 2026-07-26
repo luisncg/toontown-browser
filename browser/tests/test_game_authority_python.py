@@ -31,6 +31,7 @@ class GameAuthorityPythonTests(unittest.TestCase):
             secret: process.env.TEST_SECRET,
             release: "a".repeat(64),
             thumbprint: "b".repeat(64),
+            officialBuildId: "c".repeat(32),
             now: 1800000000000,
           });
           const transition = createGameTransitionCapability({
@@ -38,6 +39,7 @@ class GameAuthorityPythonTests(unittest.TestCase):
             stateToken: state.stateToken,
             release: "a".repeat(64),
             thumbprint: "b".repeat(64),
+            officialBuildId: "c".repeat(32),
             action: "estate.enter",
             target: {manager: 1001, owner: 2002},
             now: 1800000000000,

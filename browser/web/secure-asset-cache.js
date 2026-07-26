@@ -51,7 +51,7 @@
       }
       const result = await response.json();
       if (
-        ![1, 2].includes(result?.version) ||
+        ![1, 3].includes(result?.version) ||
         !Array.isArray(result.tickets) ||
         result.tickets.length > requested.length
       ) {
@@ -69,10 +69,16 @@
           issuedNames.has(ticket.name) ||
           typeof ticket.url !== "string" ||
           (
-            result.version === 2 &&
+            result.version === 3 &&
             (
               typeof ticket.authority !== "string" ||
-              !/^[a-f0-9]{32}$/.test(ticket.authority)
+              !/^[a-f0-9]{32}$/.test(ticket.authority) ||
+              typeof ticket.build !== "string" ||
+              !/^[a-f0-9]{64}$/.test(ticket.build) ||
+              typeof ticket.officialBuild !== "string" ||
+              !/^[a-f0-9]{32}$/.test(ticket.officialBuild) ||
+              ticket.build !== result.buildId ||
+              ticket.officialBuild !== result.officialBuildId
             )
           )
         ) {
@@ -95,6 +101,8 @@
         this.urls.set(ticket.name, Object.freeze({
           url: url.href,
           authority: ticket.authority,
+          build: ticket.build,
+          officialBuild: ticket.officialBuild,
         }));
       }
       this.stats.batches += 1;
@@ -110,6 +118,13 @@
       const headers = new Headers(asset.request.headers);
       if (ticket.authority) {
         headers.set("X-Toontown-Asset-Authority", ticket.authority);
+      }
+      if (ticket.build) headers.set("X-Toontown-Build", ticket.build);
+      if (ticket.officialBuild) {
+        headers.set(
+          "X-Toontown-Official-Build-Id",
+          ticket.officialBuild,
+        );
       }
       return new Request(ticket.url, {
         method: "GET",

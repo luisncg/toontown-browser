@@ -333,6 +333,15 @@ RUNTIME_VERSION="$({
   if [[ -f "$DIST_DIR/secure-asset-cache.js" ]]; then
     shasum -a 256 "$DIST_DIR/secure-asset-cache.js"
   fi
+  for official_build_asset in \
+    "$DIST_DIR/app.js" \
+    "$DIST_DIR/index.html" \
+    "$DIST_DIR/styles.css" \
+    "$DIST_DIR/welcome-gate.js"; do
+    if [[ -f "$official_build_asset" ]]; then
+      shasum -a 256 "$official_build_asset"
+    fi
+  done
 } | shasum -a 256 | awk '{print $1}')"
 perl -pi -e \
   "s/__TOONTOWN_RUNTIME_VERSION__/$RUNTIME_VERSION/g" \

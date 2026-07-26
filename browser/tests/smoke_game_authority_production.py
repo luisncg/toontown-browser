@@ -93,7 +93,7 @@ summary = {
 print(json.dumps(summary, indent=2))
 
 assert summary["transitionIssued"]
-assert summary["capabilityPrefix"] == "gt1"
+assert summary["capabilityPrefix"] == "gt2"
 assert summary["gameSessions"] == 1
 assert summary["gameTransitions"] == 1
 assert summary["gameSequence"] == 0

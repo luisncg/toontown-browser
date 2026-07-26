@@ -16,6 +16,8 @@ const context = {
   userAgent: "Toontown Browser lease test/1.0",
   origin: "https://toontown.lui.ss",
   authorityKey: "b".repeat(32),
+  buildId: "c".repeat(64),
+  officialBuildId: "d".repeat(32),
 };
 const lease = createGatewayLease({
   secret,
@@ -24,7 +26,7 @@ const lease = createGatewayLease({
   ttlSeconds: 120,
 });
 
-assert.match(lease, /^v1(?:\.[A-Za-z0-9_-]+){3}$/);
+assert.match(lease, /^v2(?:\.[A-Za-z0-9_-]+){3}$/);
 assert.ok(!lease.includes(context.sessionKey));
 assert.ok(!lease.includes(context.resumeToken));
 assert.equal(verifyGatewayLease(lease, secret, context, now), true);
@@ -69,6 +71,24 @@ assert.equal(
     lease,
     secret,
     { ...context, authorityKey: "c".repeat(32) },
+    now,
+  ),
+  false,
+);
+assert.equal(
+  verifyGatewayLease(
+    lease,
+    secret,
+    { ...context, buildId: "e".repeat(64) },
+    now,
+  ),
+  false,
+);
+assert.equal(
+  verifyGatewayLease(
+    lease,
+    secret,
+    { ...context, officialBuildId: "e".repeat(32) },
     now,
   ),
   false,

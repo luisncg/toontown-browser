@@ -8,13 +8,13 @@ import secrets
 import time
 
 
-GAME_AUTHORITY_PROTOCOL = 1
-GAME_CONTENT_EPOCH = 'gameplay-v1'
+GAME_AUTHORITY_PROTOCOL = 2
+GAME_CONTENT_EPOCH = 'gameplay-v2'
 GAME_STATE_TTL_SECONDS = 6 * 60 * 60
 GAME_TRANSITION_TTL_SECONDS = 45
 
-_STATE_PREFIX = 'gs1'
-_TRANSITION_PREFIX = 'gt1'
+_STATE_PREFIX = 'gs2'
+_TRANSITION_PREFIX = 'gt2'
 _HEX_32 = re.compile(r'^[a-f0-9]{32}$')
 _HEX_64 = re.compile(r'^[a-f0-9]{64}$')
 _MARKER = re.compile(r'^[A-Za-z0-9_-]{22}$')
@@ -211,6 +211,7 @@ def verify_state(token, secret=None, release=None, now=None):
         bool(_HEX_64.match(payload.get('r', ''))) and
         bool(_HEX_32.match(payload.get('sid', ''))) and
         bool(_HEX_32.match(payload.get('st', ''))) and
+        bool(_HEX_32.match(payload.get('ob', ''))) and
         bool(_MARKER.match(payload.get('m', ''))) and
         isinstance(payload.get('sq'), int) and
         not isinstance(payload.get('sq'), bool) and
@@ -242,6 +243,7 @@ def verify_transition(token, action=None, target=None, secret=None,
         bool(_HEX_32.match(payload.get('sid', ''))) and
         bool(_HEX_32.match(payload.get('ps', ''))) and
         bool(_HEX_32.match(payload.get('ns', ''))) and
+        bool(_HEX_32.match(payload.get('ob', ''))) and
         bool(_MARKER.match(payload.get('m', ''))) and
         bool(_MARKER.match(payload.get('n', ''))) and
         isinstance(payload.get('sq'), int) and
@@ -272,6 +274,7 @@ def advance_state(transition, secret=None, now=None):
         'sq': transition['sq'],
         'ce': transition['ce'],
         'm': transition['m'],
+        'ob': transition['ob'],
         'iat': issued,
         'exp': issued + GAME_STATE_TTL_SECONDS,
     }
@@ -289,6 +292,7 @@ def advance_state(transition, secret=None, now=None):
         'release': transition['r'],
         'contentEpoch': transition['ce'],
         'marker': transition['m'],
+        'officialBuildId': transition['ob'],
         'sequence': transition['sq'],
         'stateToken': state_token,
         'receipt': {

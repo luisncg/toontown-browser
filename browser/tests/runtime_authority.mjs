@@ -4,11 +4,13 @@ import {
   sign as signValue,
 } from "node:crypto";
 import {
+  createOfficialBuildAttestation,
   createRuntimeAuthorization,
   createRuntimeChallenge,
   createWorldCapability,
   runtimeRegistrationMessage,
   runtimeRequestMessage,
+  verifyOfficialBuildAttestation,
   verifyRuntimeRegistration,
   verifyRuntimeRequestProof,
 } from "../shared/runtime-authority.mjs";
@@ -32,9 +34,9 @@ const challenge = createRuntimeChallenge({
   now,
   ...context,
 });
-assert.equal(challenge.version, 1);
+assert.equal(challenge.version, 2);
 assert.equal(challenge.release, context.release);
-assert.match(challenge.challengeToken, /^rc1(?:\.[A-Za-z0-9_-]+){3}$/);
+assert.match(challenge.challengeToken, /^rc2(?:\.[A-Za-z0-9_-]+){3}$/);
 
 const registrationSignature = signValue(
   "sha256",
@@ -86,9 +88,38 @@ const authorization = createRuntimeAuthorization({
 });
 assert.match(
   authorization.authorization,
-  /^ra1(?:\.[A-Za-z0-9_-]+){3}$/,
+  /^ra2(?:\.[A-Za-z0-9_-]+){3}$/,
 );
 assert.match(authorization.authorizationId, /^[a-f0-9]{32}$/);
+const officialBuild = createOfficialBuildAttestation({
+  secret,
+  authorizationId: authorization.authorizationId,
+  thumbprint: registration.thumbprint,
+  now,
+  ...context,
+});
+assert.equal(officialBuild.version, 1);
+assert.equal(officialBuild.buildId, context.release);
+assert.match(officialBuild.attestation, /^ob1(?:\.[A-Za-z0-9_-]+){3}$/);
+assert.match(officialBuild.attestationId, /^[a-f0-9]{32}$/);
+assert.ok(verifyOfficialBuildAttestation({
+  secret,
+  attestation: officialBuild.attestation,
+  attestationId: officialBuild.attestationId,
+  authorizationId: authorization.authorizationId,
+  thumbprint: registration.thumbprint,
+  context,
+  now,
+}));
+assert.equal(verifyOfficialBuildAttestation({
+  secret,
+  attestation: officialBuild.attestation,
+  attestationId: officialBuild.attestationId,
+  authorizationId: authorization.authorizationId,
+  thumbprint: registration.thumbprint,
+  context: { ...context, origin: "https://copied.example" },
+  now,
+}), null);
 
 const body = Buffer.from(JSON.stringify({
   names: ["phase-4-part-1.data"],
@@ -99,6 +130,7 @@ const proofSignature = signValue(
   "sha256",
   runtimeRequestMessage({
     authorizationId: authorization.authorizationId,
+    officialBuildId: officialBuild.attestationId,
     method: "POST",
     pathname: "/api/assets/tickets",
     timestamp,
@@ -116,6 +148,7 @@ const proof = verifyRuntimeRequestProof({
   method: "POST",
   pathname: "/api/assets/tickets",
   body,
+  officialBuildId: officialBuild.attestationId,
   context,
   now,
 });
@@ -131,6 +164,7 @@ assert.equal(
     method: "POST",
     pathname: "/api/gateway/lease",
     body,
+    officialBuildId: officialBuild.attestationId,
     context,
     now,
   }),
@@ -146,6 +180,7 @@ assert.equal(
     method: "POST",
     pathname: "/api/assets/tickets",
     body: Buffer.from("{}"),
+    officialBuildId: officialBuild.attestationId,
     context,
     now,
   }),
@@ -155,6 +190,7 @@ assert.equal(
 const world = createWorldCapability({
   secret,
   authorizationId: authorization.authorizationId,
+  officialBuildId: officialBuild.attestationId,
   zoneId: 2_000,
   requiredPhases: ["4"],
   contentEpoch: "world-v1-test",
@@ -163,7 +199,8 @@ const world = createWorldCapability({
 });
 assert.equal(world.zoneId, 2_000);
 assert.deepEqual(world.requiredPhases, ["4"]);
-assert.match(world.capability, /^rw1(?:\.[A-Za-z0-9_-]+){3}$/);
+assert.equal(world.officialBuildId, officialBuild.attestationId);
+assert.match(world.capability, /^rw2(?:\.[A-Za-z0-9_-]+){3}$/);
 
 console.log(
   "Runtime authority tests passed: PoP, release/context binding, and capabilities",

@@ -128,6 +128,7 @@ const gatewayUrl = await gatewayStore.redirect(
   "gzip, br",
   "3".repeat(32),
   "5".repeat(32),
+  "6".repeat(32),
 );
 const parsedGatewayUrl = new URL(gatewayUrl);
 assert.equal(parsedGatewayUrl.origin, "https://toontown.lui.ss");
@@ -143,6 +144,8 @@ assert.deepEqual(
     method: gatewayTicket.method,
     session: gatewayTicket.session,
     authority: gatewayTicket.authority,
+    build: gatewayTicket.build,
+    officialBuild: gatewayTicket.officialBuild,
     objectKey: gatewayTicket.objectKey,
     name: gatewayTicket.name,
     contentType: gatewayTicket.contentType,
@@ -152,6 +155,8 @@ assert.deepEqual(
     method: "GET",
     session: "3".repeat(32),
     authority: "5".repeat(32),
+    build: release,
+    officialBuild: "6".repeat(32),
     objectKey: `releases/${release}/open-toontown.wasm.gz`,
     name: "open-toontown.wasm",
     contentType: "application/wasm",
@@ -165,6 +170,7 @@ assert.equal(
     "gzip",
     "3".repeat(32),
     "5".repeat(32),
+    "6".repeat(32),
   ),
   gatewayUrl,
   "the same session may briefly reuse its opaque ticket",
@@ -176,6 +182,7 @@ assert.notEqual(
     "gzip",
     "4".repeat(32),
     "5".repeat(32),
+    "6".repeat(32),
   ),
   gatewayUrl,
   "separate sessions must receive separate opaque tickets",

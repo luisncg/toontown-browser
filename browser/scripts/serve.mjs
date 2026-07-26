@@ -18,11 +18,14 @@ import {
 } from "../shared/gateway-lease.mjs";
 import { createR2AssetStoreFromEnvironment } from "../shared/r2-assets.mjs";
 import {
+  createOfficialBuildAttestation,
   createRuntimeAuthorization,
   createRuntimeChallenge,
   createWorldCapability,
+  OFFICIAL_BUILD_ATTESTATION_PROTOCOL,
   RUNTIME_AUTHORITY_PROTOCOL,
   validateRuntimeAuthoritySecret,
+  verifyOfficialBuildAttestation,
   verifyRuntimeRegistration,
   verifyRuntimeRequestProof,
 } from "../shared/runtime-authority.mjs";
@@ -79,6 +82,9 @@ const GAME_TRANSITION_WINDOW_MS = 60_000;
 const GAME_TRANSITION_LIMIT = 90;
 const FEATURE_MODULE_WINDOW_MS = 60_000;
 const FEATURE_MODULE_LIMIT = 30;
+const SECURITY_TELEMETRY_WINDOW_MS = 60_000;
+const SECURITY_TELEMETRY_LIMIT = 12;
+const MAX_SECURITY_TELEMETRY_BODY_BYTES = 512;
 const MAX_FEATURE_MODULE_BATCH = 8;
 const MAX_RUNTIME_BODY_BYTES = 16 * 1024;
 const MAX_WORLD_CAPABILITY_ZONES = 16;
@@ -94,6 +100,7 @@ const worldCapabilityWindows = new Map();
 const gameSessionWindows = new Map();
 const gameTransitionWindows = new Map();
 const featureModuleWindows = new Map();
+const securityTelemetryWindows = new Map();
 const runtimeChallengeUses = new Map();
 const runtimeProofUses = new Map();
 const r2AssetStore = createR2AssetStoreFromEnvironment({
@@ -184,6 +191,33 @@ function json(response, status, value, extraHeaders = {}) {
     ...extraHeaders,
   });
   response.end(body);
+}
+
+function officialOriginRequired(response, reason) {
+  console.warn(`[OfficialBuildReject] ${JSON.stringify({
+    reason,
+    release: runtimeRelease(),
+  })}`);
+  json(response, 403, {
+    error: "OFFICIAL_ORIGIN_REQUIRED",
+    officialUrl: `${publicOrigin || "https://toontown.lui.ss"}/`,
+  }, {
+    "X-Toontown-Official-Error": "1",
+  });
+}
+
+function requireOfficialBuildClaim(request, response) {
+  if (!production) return true;
+  const origin = String(request.headers.origin ?? "");
+  if (
+    (origin && origin !== publicOrigin) ||
+    (request.method !== "GET" && origin !== publicOrigin) ||
+    request.headers["x-toontown-build"] !== runtimeRelease()
+  ) {
+    officialOriginRequired(response, "invalid-build");
+    return false;
+  }
+  return true;
 }
 
 function requestIp(request) {
@@ -327,8 +361,21 @@ function verifyRuntimeProof(request, pathname, rawBody) {
       authorizationId: "0".repeat(32),
       thumbprint: "0".repeat(64),
       release: runtimeRelease(),
+      officialBuildId: "0".repeat(32),
       expiresAt: Number.MAX_SAFE_INTEGER,
     });
+  }
+  const attestation = request.headers["x-toontown-official-build"];
+  const officialBuildId =
+    request.headers["x-toontown-official-build-id"];
+  if (
+    typeof attestation !== "string" ||
+    !/^ob1(?:\.[A-Za-z0-9_-]+){3}$/.test(attestation) ||
+    typeof officialBuildId !== "string" ||
+    !/^[a-f0-9]{32}$/.test(officialBuildId) ||
+    request.headers["x-toontown-build"] !== runtimeRelease()
+  ) {
+    return Object.freeze({ officialFailure: true });
   }
   const proof = verifyRuntimeRequestProof({
     secret: runtimeAuthoritySecret,
@@ -339,15 +386,41 @@ function verifyRuntimeProof(request, pathname, rawBody) {
     method: request.method,
     pathname,
     body: rawBody,
+    officialBuildId,
     context: runtimeContext(request),
   });
   if (
     !proof ||
-    request.headers["x-toontown-authority-id"] !== proof.authorizationId ||
-    !consumeOneUse(runtimeProofUses, proof.replayKey, proof.expiresAt)
+    request.headers["x-toontown-authority-id"] !== proof.authorizationId
   ) {
     return null;
   }
+  const official = verifyOfficialBuildAttestation({
+    secret: runtimeAuthoritySecret,
+    attestation,
+    attestationId: officialBuildId,
+    authorizationId: proof.authorizationId,
+    thumbprint: proof.thumbprint,
+    context: runtimeContext(request),
+  });
+  if (!official) return Object.freeze({ officialFailure: true });
+  if (!consumeOneUse(runtimeProofUses, proof.replayKey, proof.expiresAt)) {
+    return null;
+  }
+  return Object.freeze({
+    ...proof,
+    officialBuildId: official.attestationId,
+    buildId: official.buildId,
+  });
+}
+
+function requireRuntimeProof(request, response, pathname, rawBody) {
+  const proof = verifyRuntimeProof(request, pathname, rawBody);
+  if (proof?.officialFailure) {
+    officialOriginRequired(response, "invalid-attestation");
+    return null;
+  }
+  if (!proof) json(response, 403, { ok: false });
   return proof;
 }
 
@@ -1189,15 +1262,74 @@ async function receivePerformance(request, response) {
   json(response, 202, { ok: true });
 }
 
+async function receiveSecurityTelemetry(request, response) {
+  if (request.method !== "POST") {
+    json(response, 405, { ok: false }, { Allow: "POST" });
+    return;
+  }
+  const ip = requestIp(request);
+  if (!consumeWindow(
+    securityTelemetryWindows,
+    ip,
+    SECURITY_TELEMETRY_WINDOW_MS,
+    SECURITY_TELEMETRY_LIMIT,
+  )) {
+    json(response, 429, { ok: false });
+    return;
+  }
+  const contentLength = Number(request.headers["content-length"]);
+  if (
+    Number.isFinite(contentLength) &&
+    contentLength > MAX_SECURITY_TELEMETRY_BODY_BYTES
+  ) {
+    request.resume();
+    json(response, 413, { ok: false });
+    return;
+  }
+  let body;
+  try {
+    body = await readJsonBody(request, MAX_SECURITY_TELEMETRY_BODY_BYTES);
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  const reasons = new Set([
+    "wrong-origin",
+    "embedded-client",
+    "invalid-build",
+    "invalid-attestation",
+  ]);
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    !reasons.has(body.reason) ||
+    (
+      body.build !== undefined &&
+      (
+        typeof body.build !== "string" ||
+        !/^[a-f0-9]{64}$/.test(body.build)
+      )
+    ) ||
+    Object.keys(body).some((key) => !["reason", "build"].includes(key))
+  ) {
+    json(response, 400, { ok: false });
+    return;
+  }
+  console.warn(`[OfficialBuildTelemetry] ${JSON.stringify({
+    reason: body.reason,
+    ...(body.build ? { build: body.build } : {}),
+    release: runtimeRelease(),
+  })}`);
+  json(response, 202, { ok: true });
+}
+
 async function verifyTurnstile(request, response) {
   if (request.method !== "POST") {
     json(response, 405, { ok: false }, { Allow: "POST" });
     return;
   }
-  if (request.headers.origin !== publicOrigin) {
-    json(response, 403, { ok: false });
-    return;
-  }
+  if (!requireOfficialBuildClaim(request, response)) return;
 
   const ip = requestIp(request);
   if (!consumeVerifyAttempt(ip)) {
@@ -1282,10 +1414,7 @@ async function issueRuntimeChallenge(request, response) {
     json(response, 401, { ok: false });
     return;
   }
-  if (request.headers.origin !== publicOrigin) {
-    json(response, 403, { ok: false });
-    return;
-  }
+  if (!requireOfficialBuildClaim(request, response)) return;
   const sessionKey = bootstrapSessionDigest(request.headers);
   if (!consumeWindow(
     runtimeChallengeWindows,
@@ -1333,10 +1462,7 @@ async function issueRuntimeAuthorization(request, response) {
     json(response, 401, { ok: false });
     return;
   }
-  if (request.headers.origin !== publicOrigin) {
-    json(response, 403, { ok: false });
-    return;
-  }
+  if (!requireOfficialBuildClaim(request, response)) return;
   const sessionKey = bootstrapSessionDigest(request.headers);
   if (!consumeWindow(
     runtimeAuthorizeWindows,
@@ -1382,11 +1508,22 @@ async function issueRuntimeAuthorization(request, response) {
     return;
   }
   try {
-    json(response, 200, createRuntimeAuthorization({
+    const context = runtimeContext(request, sessionKey);
+    const runtimeAuthorization = createRuntimeAuthorization({
       secret: runtimeAuthoritySecret,
       publicKey: registration.publicKey,
-      ...runtimeContext(request, sessionKey),
-    }));
+      ...context,
+    });
+    const officialBuild = createOfficialBuildAttestation({
+      secret: runtimeAuthoritySecret,
+      authorizationId: runtimeAuthorization.authorizationId,
+      thumbprint: registration.thumbprint,
+      ...context,
+    });
+    json(response, 200, {
+      ...runtimeAuthorization,
+      officialBuild,
+    });
   } catch {
     json(response, 503, { ok: false });
   }
@@ -1397,15 +1534,12 @@ async function issueWorldCapabilities(request, response) {
     json(response, 405, { ok: false }, { Allow: "POST" });
     return;
   }
+  if (!requireOfficialBuildClaim(request, response)) return;
   if (
     production &&
     !verifyBootstrapSession(request.headers, sessionSecret)
   ) {
     json(response, 401, { ok: false });
-    return;
-  }
-  if (production && request.headers.origin !== publicOrigin) {
-    json(response, 403, { ok: false });
     return;
   }
   let body;
@@ -1419,15 +1553,13 @@ async function issueWorldCapabilities(request, response) {
     json(response, 400, { ok: false });
     return;
   }
-  const proof = verifyRuntimeProof(
+  const proof = requireRuntimeProof(
     request,
+    response,
     "/api/runtime/world-capabilities",
     raw,
   );
-  if (!proof) {
-    json(response, 403, { ok: false });
-    return;
-  }
+  if (!proof) return;
   if (
     !body ||
     !Array.isArray(body.zoneIds) ||
@@ -1459,6 +1591,7 @@ async function issueWorldCapabilities(request, response) {
         stateToken: body.stateToken,
         release: proof.release,
         thumbprint: proof.thumbprint,
+        officialBuildId: proof.officialBuildId,
       });
       if (!state) {
         json(response, 403, { ok: false });
@@ -1470,14 +1603,15 @@ async function issueWorldCapabilities(request, response) {
       const composition = worldCompositionForZone(zoneId, requiredPhases);
       return {
         ...createWorldCapability({
-        secret: production ? runtimeAuthoritySecret : gameAuthoritySecret,
-        authorizationId: proof.authorizationId,
-        zoneId,
+          secret: production ? runtimeAuthoritySecret : gameAuthoritySecret,
+          authorizationId: proof.authorizationId,
+          officialBuildId: proof.officialBuildId,
+          zoneId,
           requiredPhases: composition.requiredPhases,
           contentEpoch: composition.epoch,
           compositionDigest: composition.digest,
           forensicMarker: state?.m ?? "",
-        ...context,
+          ...context,
         }),
         composition,
       };
@@ -1485,6 +1619,7 @@ async function issueWorldCapabilities(request, response) {
     json(response, 200, {
       version: RUNTIME_AUTHORITY_PROTOCOL,
       release: context.release,
+      officialBuildId: proof.officialBuildId,
       capabilities,
     });
   } catch {
@@ -1497,10 +1632,10 @@ async function issueGameSession(request, response) {
     json(response, 405, { ok: false }, { Allow: "POST" });
     return;
   }
+  if (!requireOfficialBuildClaim(request, response)) return;
   if (
     production &&
-    (!verifyBootstrapSession(request.headers, sessionSecret) ||
-      request.headers.origin !== publicOrigin)
+    !verifyBootstrapSession(request.headers, sessionSecret)
   ) {
     json(response, 401, { ok: false });
     return;
@@ -1516,9 +1651,14 @@ async function issueGameSession(request, response) {
     json(response, 400, { ok: false });
     return;
   }
-  const proof = verifyRuntimeProof(request, "/api/runtime/game-session", raw);
+  const proof = requireRuntimeProof(
+    request,
+    response,
+    "/api/runtime/game-session",
+    raw,
+  );
+  if (!proof) return;
   if (
-    !proof ||
     !body ||
     typeof body !== "object" ||
     Array.isArray(body) ||
@@ -1541,6 +1681,7 @@ async function issueGameSession(request, response) {
       secret: gameAuthoritySecret,
       release: proof.release,
       thumbprint: proof.thumbprint,
+      officialBuildId: proof.officialBuildId,
     }));
   } catch {
     json(response, 503, { ok: false });
@@ -1552,10 +1693,10 @@ async function issueGameTransition(request, response) {
     json(response, 405, { ok: false }, { Allow: "POST" });
     return;
   }
+  if (!requireOfficialBuildClaim(request, response)) return;
   if (
     production &&
-    (!verifyBootstrapSession(request.headers, sessionSecret) ||
-      request.headers.origin !== publicOrigin)
+    !verifyBootstrapSession(request.headers, sessionSecret)
   ) {
     json(response, 401, { ok: false });
     return;
@@ -1571,13 +1712,14 @@ async function issueGameTransition(request, response) {
     json(response, 400, { ok: false });
     return;
   }
-  const proof = verifyRuntimeProof(
+  const proof = requireRuntimeProof(
     request,
+    response,
     "/api/runtime/game-transitions",
     raw,
   );
+  if (!proof) return;
   if (
-    !proof ||
     !body ||
     typeof body.stateToken !== "string" ||
     typeof body.action !== "string" ||
@@ -1591,6 +1733,7 @@ async function issueGameTransition(request, response) {
     stateToken: body.stateToken,
     release: proof.release,
     thumbprint: proof.thumbprint,
+    officialBuildId: proof.officialBuildId,
   });
   if (!state) {
     json(response, 409, { ok: false });
@@ -1611,6 +1754,7 @@ async function issueGameTransition(request, response) {
       stateToken: body.stateToken,
       release: proof.release,
       thumbprint: proof.thumbprint,
+      officialBuildId: proof.officialBuildId,
       action: body.action,
       target: body.target,
     }));
@@ -1624,10 +1768,10 @@ async function issueFeatureModules(request, response) {
     json(response, 405, { ok: false }, { Allow: "POST" });
     return;
   }
+  if (!requireOfficialBuildClaim(request, response)) return;
   if (
     production &&
-    (!verifyBootstrapSession(request.headers, sessionSecret) ||
-      request.headers.origin !== publicOrigin)
+    !verifyBootstrapSession(request.headers, sessionSecret)
   ) {
     json(response, 401, { ok: false });
     return;
@@ -1643,13 +1787,14 @@ async function issueFeatureModules(request, response) {
     json(response, 400, { ok: false });
     return;
   }
-  const proof = verifyRuntimeProof(
+  const proof = requireRuntimeProof(
     request,
+    response,
     "/api/runtime/feature-modules",
     raw,
   );
+  if (!proof) return;
   if (
-    !proof ||
     !body ||
     typeof body.stateToken !== "string" ||
     !Array.isArray(body.moduleIds) ||
@@ -1665,6 +1810,7 @@ async function issueFeatureModules(request, response) {
     stateToken: body.stateToken,
     release: proof.release,
     thumbprint: proof.thumbprint,
+    officialBuildId: proof.officialBuildId,
   });
   if (!state) {
     json(response, 409, { ok: false });
@@ -1696,6 +1842,7 @@ async function issueFeatureModules(request, response) {
         stateToken: body.stateToken,
         release: proof.release,
         thumbprint: proof.thumbprint,
+        officialBuildId: proof.officialBuildId,
         moduleId,
         module,
       })
@@ -1703,6 +1850,7 @@ async function issueFeatureModules(request, response) {
     json(response, 200, {
       version: GAME_AUTHORITY_PROTOCOL,
       release: proof.release,
+      officialBuildId: proof.officialBuildId,
       modules,
     });
   } catch {
@@ -1715,15 +1863,12 @@ async function issueAssetTickets(request, response) {
     json(response, 405, { ok: false }, { Allow: "POST" });
     return;
   }
+  if (!requireOfficialBuildClaim(request, response)) return;
   if (
     production &&
     !verifyBootstrapSession(request.headers, sessionSecret)
   ) {
     json(response, 401, { ok: false });
-    return;
-  }
-  if (production && request.headers.origin !== publicOrigin) {
-    json(response, 403, { ok: false });
     return;
   }
 
@@ -1753,11 +1898,13 @@ async function issueAssetTickets(request, response) {
     );
     return;
   }
-  const proof = verifyRuntimeProof(request, "/api/assets/tickets", raw);
-  if (!proof) {
-    json(response, 403, { ok: false });
-    return;
-  }
+  const proof = requireRuntimeProof(
+    request,
+    response,
+    "/api/assets/tickets",
+    raw,
+  );
+  if (!proof) return;
   if (
     !body ||
     !Array.isArray(body.names) ||
@@ -1785,20 +1932,29 @@ async function issueAssetTickets(request, response) {
         request.headers["accept-encoding"],
         session,
         proof.authorizationId,
+        proof.officialBuildId,
       );
       if (!url) throw new Error("unknown asset");
       return {
         name,
         url,
         authority: proof.authorizationId,
+        build: proof.buildId,
+        officialBuild: proof.officialBuildId,
       };
     }));
     json(
       response,
       200,
       {
-        version: production ? 2 : 1,
+        version: production ? 3 : 1,
         release: runtimeRelease(),
+        ...(production
+          ? {
+            buildId: proof.buildId,
+            officialBuildId: proof.officialBuildId,
+          }
+          : {}),
         tickets,
       },
       { Vary: "Accept-Encoding" },
@@ -1818,6 +1974,7 @@ async function issueGatewayLease(request, response) {
     json(response, 405, { ok: false }, { Allow: "POST" });
     return;
   }
+  if (!requireOfficialBuildClaim(request, response)) return;
   if (
     !production ||
     !verifyBootstrapSession(request.headers, sessionSecret)
@@ -1826,10 +1983,9 @@ async function issueGatewayLease(request, response) {
     return;
   }
   if (
-    request.headers.origin !== publicOrigin ||
     request.headers["sec-fetch-site"] !== "same-origin"
   ) {
-    json(response, 403, { ok: false });
+    officialOriginRequired(response, "wrong-origin");
     return;
   }
 
@@ -1853,11 +2009,13 @@ async function issueGatewayLease(request, response) {
     json(response, 400, { ok: false });
     return;
   }
-  const proof = verifyRuntimeProof(request, "/api/gateway/lease", raw);
-  if (!proof) {
-    json(response, 403, { ok: false });
-    return;
-  }
+  const proof = requireRuntimeProof(
+    request,
+    response,
+    "/api/gateway/lease",
+    raw,
+  );
+  if (!proof) return;
 
   const sessionKey = bootstrapSessionDigest(request.headers);
   if (!consumeWindow(
@@ -1886,13 +2044,17 @@ async function issueGatewayLease(request, response) {
       userAgent,
       origin: publicOrigin,
       authorityKey: proof.authorizationId,
+      buildId: proof.buildId,
+      officialBuildId: proof.officialBuildId,
       now: issuedAt,
     });
     json(response, 200, {
-      version: 2,
+      version: 3,
       resume,
       lease,
       authority: proof.authorizationId,
+      buildId: proof.buildId,
+      officialBuildId: proof.officialBuildId,
       expiresAt:
         issuedAt + DEFAULT_GATEWAY_LEASE_TTL_SECONDS * 1_000,
     });
@@ -2027,17 +2189,29 @@ export function createWebServer() {
     }
     const pathname = url.pathname;
 
+    if (pathname === "/api/security/telemetry") {
+      await receiveSecurityTelemetry(request, response);
+      return;
+    }
     if (pathname === "/api/bootstrap/config") {
+      if (!requireOfficialBuildClaim(request, response)) return;
       json(response, 200, {
         required: production,
         authorityRequired: production,
         authorityProtocol: RUNTIME_AUTHORITY_PROTOCOL,
+        attestationProtocol: OFFICIAL_BUILD_ATTESTATION_PROTOCOL,
+        attestationRequired: production,
         release: runtimeRelease(),
+        buildId: runtimeRelease(),
+        officialOrigin: production
+          ? publicOrigin
+          : `http://127.0.0.1:${port}`,
         ...(production ? { siteKey: turnstileSiteKey } : {}),
       });
       return;
     }
     if (pathname === "/api/bootstrap/session") {
+      if (!requireOfficialBuildClaim(request, response)) return;
       const valid =
         !production ||
         verifyBootstrapSession(request.headers, sessionSecret);
@@ -2147,6 +2321,7 @@ export function createWebServer() {
           request.method,
           request.headers["accept-encoding"],
           privateAssetSessionId(request),
+          "0".repeat(32),
           "0".repeat(32),
         );
         if (location) {

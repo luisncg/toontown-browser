@@ -37,11 +37,11 @@ async function availablePort() {
   return port;
 }
 
-async function waitForServer(url, child) {
+async function waitForServer(url, child, headers = {}) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (child.exitCode !== null) throw new Error("Web server exited during startup");
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { headers });
       if (response.ok) return;
     } catch {
       // The loopback listener may not be ready yet.
@@ -152,23 +152,79 @@ child.stdout.on("data", (chunk) => {
 });
 
 try {
-  await waitForServer(`${origin}/api/bootstrap/config`, child);
-
-  const config = await fetch(`${origin}/api/bootstrap/config`).then((response) =>
-    response.json()
+  const bootstrapHeaders = {
+    Origin: publicOrigin,
+    "X-Toontown-Build": release,
+  };
+  await waitForServer(
+    `${origin}/api/bootstrap/config`,
+    child,
+    bootstrapHeaders,
   );
+
+  const config = await fetch(`${origin}/api/bootstrap/config`, {
+    headers: bootstrapHeaders,
+  }).then((response) => response.json());
   assert.deepEqual(config, {
     required: true,
     authorityRequired: true,
-    authorityProtocol: 1,
+    authorityProtocol: 2,
+    attestationProtocol: 1,
+    attestationRequired: true,
     release,
+    buildId: release,
+    officialOrigin: publicOrigin,
     siteKey: "test-public-site-key",
   });
   assert.deepEqual(
-    await fetch(`${origin}/api/bootstrap/session`).then((response) =>
-      response.json()
-    ),
+    await fetch(`${origin}/api/bootstrap/session`, {
+      headers: bootstrapHeaders,
+    }).then((response) => response.json()),
     { valid: false },
+  );
+  const wrongBuildConfig = await fetch(`${origin}/api/bootstrap/config`, {
+    headers: {
+      Origin: publicOrigin,
+      "X-Toontown-Build": "0".repeat(64),
+    },
+  });
+  assert.equal(wrongBuildConfig.status, 403);
+  assert.equal(
+    wrongBuildConfig.headers.get("x-toontown-official-error"),
+    "1",
+  );
+  assert.deepEqual(await wrongBuildConfig.json(), {
+    error: "OFFICIAL_ORIGIN_REQUIRED",
+    officialUrl: `${publicOrigin}/`,
+  });
+  assert.equal(
+    (
+      await fetch(`${origin}/api/security/telemetry`, {
+        method: "POST",
+        headers: {
+          Origin: "https://copied.example",
+          "Content-Type": "text/plain;charset=UTF-8",
+        },
+        body: JSON.stringify({
+          reason: "wrong-origin",
+          build: release,
+        }),
+      })
+    ).status,
+    202,
+  );
+  assert.equal(
+    (
+      await fetch(`${origin}/api/security/telemetry`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body: JSON.stringify({
+          reason: "wrong-origin",
+          account: "must-not-be-accepted",
+        }),
+      })
+    ).status,
+    400,
   );
   assert.equal((await fetch(`${origin}/app.js`)).status, 200);
   assert.equal((await fetch(`${origin}/runtime-authority.js`)).status, 200);
@@ -207,6 +263,8 @@ try {
       {
         headers: {
           Cookie: `${BOOTSTRAP_COOKIE}=${cookie}`,
+          Origin: publicOrigin,
+          "X-Toontown-Build": release,
           "X-Toontown-Client-IP": clientIp,
           "User-Agent": userAgent,
         },
@@ -233,6 +291,7 @@ try {
           Cookie: `${BOOTSTRAP_COOKIE}=${cookie}`,
           Origin: publicOrigin,
           "Content-Type": "application/json",
+          "X-Toontown-Build": release,
           "X-Toontown-Client-IP": clientIp,
           "User-Agent": userAgent,
         },
@@ -245,9 +304,19 @@ try {
     );
     assert.equal(authorizationResponse.status, 200);
     const material = await authorizationResponse.json();
-    assert.equal(material.version, 1);
+    assert.equal(material.version, 2);
     assert.equal(material.release, release);
     assert.match(material.authorizationId, /^[a-f0-9]{32}$/);
+    assert.equal(material.officialBuild.version, 1);
+    assert.equal(material.officialBuild.buildId, release);
+    assert.match(
+      material.officialBuild.attestation,
+      /^ob1(?:\.[A-Za-z0-9_-]+){3}$/,
+    );
+    assert.match(
+      material.officialBuild.attestationId,
+      /^[a-f0-9]{32}$/,
+    );
 
     return {
       material,
@@ -268,6 +337,7 @@ try {
           "sha256",
           runtimeRequestMessage({
             authorizationId: material.authorizationId,
+            officialBuildId: material.officialBuild.attestationId,
             method: "POST",
             pathname,
             timestamp,
@@ -289,6 +359,11 @@ try {
             "User-Agent": userAgent,
             "X-Toontown-Authority": material.authorization,
             "X-Toontown-Authority-Id": material.authorizationId,
+            "X-Toontown-Official-Build":
+              material.officialBuild.attestation,
+            "X-Toontown-Official-Build-Id":
+              material.officialBuild.attestationId,
+            "X-Toontown-Build": material.officialBuild.buildId,
             "X-Toontown-Proof-Time": timestamp,
             "X-Toontown-Proof-Nonce": nonce,
             "X-Toontown-Proof": proof,
@@ -311,6 +386,7 @@ try {
           Origin: publicOrigin,
           "Sec-Fetch-Site": "same-origin",
           "Content-Type": "application/json",
+          "X-Toontown-Build": release,
           "X-Toontown-Client-IP": gatewayClientIp,
           "User-Agent": gatewayUserAgent,
         },
@@ -327,6 +403,7 @@ try {
           Cookie: `${BOOTSTRAP_COOKIE}=${session}`,
           Origin: publicOrigin,
           "Content-Type": "application/json",
+          "X-Toontown-Build": release,
           "X-Toontown-Client-IP": gatewayClientIp,
           "User-Agent": gatewayUserAgent,
         },
@@ -361,7 +438,7 @@ try {
   assert.equal(gatewayLeaseResponse.status, 200);
   assert.equal(gatewayLeaseResponse.headers.get("cache-control"), "no-store");
   const gatewayMaterial = await gatewayLeaseResponse.json();
-  assert.equal(gatewayMaterial.version, 2);
+  assert.equal(gatewayMaterial.version, 3);
   assert.equal(
     gatewayMaterial.authority,
     authorityClient.material.authorizationId,
@@ -369,7 +446,12 @@ try {
   assert.match(gatewayMaterial.resume, /^[A-Za-z0-9_-]{32}$/);
   assert.match(
     gatewayMaterial.lease,
-    /^v1(?:\.[A-Za-z0-9_-]+){3}$/,
+    /^v2(?:\.[A-Za-z0-9_-]+){3}$/,
+  );
+  assert.equal(gatewayMaterial.buildId, release);
+  assert.equal(
+    gatewayMaterial.officialBuildId,
+    authorityClient.material.officialBuild.attestationId,
   );
   assert.ok(gatewayMaterial.expiresAt > Date.now());
   assert.ok(!gatewayMaterial.lease.includes(session));
@@ -384,6 +466,9 @@ try {
         userAgent: gatewayUserAgent,
         origin: publicOrigin,
         authorityKey: authorityClient.material.authorizationId,
+        buildId: release,
+        officialBuildId:
+          authorityClient.material.officialBuild.attestationId,
       },
     ),
     true,
@@ -440,13 +525,23 @@ try {
   assert.equal(ticketBatchResponse.headers.get("cache-control"), "no-store");
   assert.equal(ticketBatchResponse.headers.get("vary"), "Accept-Encoding");
   const ticketBatch = await ticketBatchResponse.json();
-  assert.equal(ticketBatch.version, 2);
+  assert.equal(ticketBatch.version, 3);
   assert.equal(ticketBatch.release, release);
+  assert.equal(ticketBatch.buildId, release);
+  assert.equal(
+    ticketBatch.officialBuildId,
+    authorityClient.material.officialBuild.attestationId,
+  );
   assert.equal(ticketBatch.tickets.length, 1);
   assert.equal(ticketBatch.tickets[0].name, "phase-4-part-1.data");
   assert.equal(
     ticketBatch.tickets[0].authority,
     authorityClient.material.authorizationId,
+  );
+  assert.equal(ticketBatch.tickets[0].build, release);
+  assert.equal(
+    ticketBatch.tickets[0].officialBuild,
+    authorityClient.material.officialBuild.attestationId,
   );
   assert.match(ticketBatch.tickets[0].url, /^https:\/\/assets\.invalid\/assets\/v1\./);
   assert.ok(!ticketBatch.tickets[0].url.includes("phase-4"));
@@ -458,14 +553,19 @@ try {
   );
   assert.equal(gameSessionResponse.status, 200);
   const gameSession = await gameSessionResponse.json();
-  assert.equal(gameSession.version, 1);
+  assert.equal(gameSession.version, 2);
   assert.equal(gameSession.release, release);
-  assert.match(gameSession.stateToken, /^gs1(?:\.[A-Za-z0-9_-]+){2}$/);
+  assert.equal(
+    gameSession.officialBuildId,
+    authorityClient.material.officialBuild.attestationId,
+  );
+  assert.match(gameSession.stateToken, /^gs2(?:\.[A-Za-z0-9_-]+){2}$/);
   assert.match(gameSession.marker, /^[A-Za-z0-9_-]{22}$/);
   const verifiedGameState = verifyGameSessionState({
     secret: runtimeAuthoritySecret,
     stateToken: gameSession.stateToken,
     release,
+    officialBuildId: gameSession.officialBuildId,
   });
   assert.equal(verifiedGameState.sq, 0);
 
@@ -479,11 +579,13 @@ try {
   );
   assert.equal(transitionResponse.status, 200);
   const transition = await transitionResponse.json();
-  assert.match(transition.capability, /^gt1(?:\.[A-Za-z0-9_-]+){2}$/);
+  assert.equal(transition.officialBuildId, gameSession.officialBuildId);
+  assert.match(transition.capability, /^gt2(?:\.[A-Za-z0-9_-]+){2}$/);
   assert.ok(verifyGameTransitionCapability({
     secret: runtimeAuthoritySecret,
     capability: transition.capability,
     release,
+    officialBuildId: gameSession.officialBuildId,
     action: "estate.enter",
     target: { manager: 1001, owner: 2002 },
   }));
@@ -521,6 +623,7 @@ try {
     moduleId: featureModules.modules[0].moduleId,
     module: featureModules.modules[0].module,
     release,
+    officialBuildId: gameSession.officialBuildId,
   }));
 
   const worldCapabilityResponse = await authorityClient.request(
@@ -529,8 +632,12 @@ try {
   );
   assert.equal(worldCapabilityResponse.status, 200);
   const worldCapabilities = await worldCapabilityResponse.json();
-  assert.equal(worldCapabilities.version, 1);
+  assert.equal(worldCapabilities.version, 2);
   assert.equal(worldCapabilities.release, release);
+  assert.equal(
+    worldCapabilities.officialBuildId,
+    gameSession.officialBuildId,
+  );
   assert.deepEqual(
     worldCapabilities.capabilities.map((entry) => entry.zoneId),
     [2_000, 22_000],
@@ -544,7 +651,8 @@ try {
     ["4", "5"],
   );
   for (const capability of worldCapabilities.capabilities) {
-    assert.match(capability.capability, /^rw1(?:\.[A-Za-z0-9_-]+){3}$/);
+    assert.equal(capability.officialBuildId, gameSession.officialBuildId);
+    assert.match(capability.capability, /^rw2(?:\.[A-Za-z0-9_-]+){3}$/);
     assert.ok(capability.expiresAt > Date.now());
     assert.equal(capability.forensicMarker, gameSession.marker);
     assert.equal(
@@ -1142,7 +1250,10 @@ try {
   );
   const refreshedSessionState =
     await fetch(`${origin}/api/bootstrap/session`, {
-      headers: { Cookie: `${BOOTSTRAP_COOKIE}=${session}` },
+      headers: {
+        Cookie: `${BOOTSTRAP_COOKIE}=${session}`,
+        ...bootstrapHeaders,
+      },
     }).then((response) => response.json());
   assert.equal(refreshedSessionState.valid, true);
   assert.equal(refreshedSessionState.runtime.release, release);

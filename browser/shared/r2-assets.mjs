@@ -154,6 +154,7 @@ export class R2AssetStore {
     acceptEncodingHeader,
     sessionKey,
     authorityKey = "",
+    officialBuildId = "",
   ) {
     let decoded;
     try {
@@ -172,13 +173,17 @@ export class R2AssetStore {
     if (authorityKey && !/^[a-f0-9]{32}$/.test(authorityKey)) {
       throw new Error("A valid runtime asset authority is required");
     }
+    if (officialBuildId && !/^[a-f0-9]{32}$/.test(officialBuildId)) {
+      throw new Error("A valid official build attestation is required");
+    }
 
     const useGzip = Boolean(
       entry.gzip && acceptsEncoding(acceptEncodingHeader, "gzip"),
     );
     const representation = useGzip ? entry.gzip : entry.identity;
     const cacheKey =
-      `${sessionKey}:${authorityKey}:${method}:${representation.objectKey}`;
+      `${sessionKey}:${authorityKey}:${officialBuildId}:${method}:` +
+      representation.objectKey;
     const now = Date.now();
     const cached = this.signedUrls.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.url;
@@ -253,6 +258,7 @@ export class WorkerAssetGatewayStore {
     acceptEncodingHeader,
     sessionKey,
     authorityKey,
+    officialBuildId,
   ) {
     let decoded;
     try {
@@ -273,6 +279,12 @@ export class WorkerAssetGatewayStore {
     ) {
       throw new Error("A valid runtime asset authority is required");
     }
+    if (
+      typeof officialBuildId !== "string" ||
+      !/^[a-f0-9]{32}$/.test(officialBuildId)
+    ) {
+      throw new Error("A valid official build attestation is required");
+    }
     if (!["GET", "HEAD"].includes(method)) return null;
 
     const useGzip = Boolean(
@@ -280,7 +292,8 @@ export class WorkerAssetGatewayStore {
     );
     const representation = useGzip ? entry.gzip : entry.identity;
     const cacheKey =
-      `${sessionKey}:${authorityKey}:${method}:${representation.objectKey}`;
+      `${sessionKey}:${authorityKey}:${officialBuildId}:${method}:` +
+      representation.objectKey;
     const now = Date.now();
     const cached = this.tickets.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.url;
@@ -288,11 +301,13 @@ export class WorkerAssetGatewayStore {
     const expiresAtSeconds = Math.floor(now / 1_000) + this.ttlSeconds;
     const ticket = await sealAssetTicket(
       {
-        version: 2,
+        version: 3,
         expiresAt: expiresAtSeconds,
         method,
         session: sessionKey,
         authority: authorityKey,
+        build: this.release,
+        officialBuild: officialBuildId,
         objectKey: representation.objectKey,
         name,
         contentType: entry.contentType,

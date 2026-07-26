@@ -1,15 +1,19 @@
 (() => {
   "use strict";
 
-  const PROTOCOL = 1;
+  const PROTOCOL = 2;
+  const GAME_PROTOCOL = 2;
+  const OFFICIAL_BUILD_PROTOCOL = 1;
+  const OFFICIAL_ORIGIN = "https://toontown.lui.ss";
   const AUTHORIZATION_REFRESH_MS = 60_000;
   const RELEASE = /^[a-f0-9]{64}$/;
   const AUTHORIZATION_ID = /^[a-f0-9]{32}$/;
-  const OPAQUE_TOKEN = /^ra1(?:\.[A-Za-z0-9_-]+){3}$/;
-  const CHALLENGE_TOKEN = /^rc1(?:\.[A-Za-z0-9_-]+){3}$/;
-  const GAME_STATE_TOKEN = /^gs1(?:\.[A-Za-z0-9_-]+){2}$/;
-  const GAME_TRANSITION_TOKEN = /^gt1(?:\.[A-Za-z0-9_-]+){2}$/;
-  const FEATURE_MODULE_TOKEN = /^gf1(?:\.[A-Za-z0-9_-]+){2}$/;
+  const OPAQUE_TOKEN = /^ra2(?:\.[A-Za-z0-9_-]+){3}$/;
+  const CHALLENGE_TOKEN = /^rc2(?:\.[A-Za-z0-9_-]+){3}$/;
+  const OFFICIAL_BUILD_TOKEN = /^ob1(?:\.[A-Za-z0-9_-]+){3}$/;
+  const GAME_STATE_TOKEN = /^gs2(?:\.[A-Za-z0-9_-]+){2}$/;
+  const GAME_TRANSITION_TOKEN = /^gt2(?:\.[A-Za-z0-9_-]+){2}$/;
+  const FEATURE_MODULE_TOKEN = /^gf2(?:\.[A-Za-z0-9_-]+){2}$/;
   const CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
   const nativeFetch = window.fetch.bind(window);
   const encoder = new TextEncoder();
@@ -30,6 +34,7 @@
     gameTransitionCommits: 0,
     featureModuleRequests: 0,
     featureModuleHits: 0,
+    officialFailures: 0,
     errors: 0,
   };
 
@@ -40,6 +45,7 @@
   let authorizationPromise;
   let gameSession;
   let gameSessionPromise;
+  let fatalReason = "";
 
   /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
   function isLocalDevelopmentPage() {
@@ -48,6 +54,78 @@
     ) && ["8080", "8180"].includes(window.location.port);
   }
   /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
+
+  function reportSecurityReason(reason) {
+    if (![
+      "wrong-origin",
+      "embedded-client",
+      "invalid-build",
+      "invalid-attestation",
+    ].includes(reason)) return;
+    const payload = JSON.stringify({
+      reason,
+      ...(RELEASE.test(release) ? { build: release } : {}),
+    });
+    nativeFetch(`${OFFICIAL_ORIGIN}/api/security/telemetry`, {
+      method: "POST",
+      mode: "no-cors",
+      cache: "no-store",
+      credentials: "omit",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body: payload,
+      keepalive: true,
+    }).catch(() => {});
+  }
+
+  function failOfficialBuild(reason = "invalid-attestation") {
+    if (fatalReason) return false;
+    fatalReason = reason;
+    diagnostics.officialFailures += 1;
+    document.documentElement.classList.add("official-build-fatal");
+    const overlay = document.querySelector("#official-build-overlay");
+    overlay?.setAttribute("aria-hidden", "false");
+    const pageShell = document.querySelector(".shell");
+    if (pageShell) pageShell.inert = true;
+    const gameCanvas = document.querySelector("#canvas");
+    gameCanvas?.setAttribute("tabindex", "-1");
+    reportSecurityReason(reason);
+    return true;
+  }
+
+  function officialResponse(response, reason = "invalid-attestation") {
+    if (
+      response?.status === 403 &&
+      response.headers.get("x-toontown-official-error") === "1"
+    ) {
+      failOfficialBuild(reason);
+      return false;
+    }
+    return true;
+  }
+
+  function bootstrapHeaders(buildId) {
+    if (!RELEASE.test(buildId ?? "")) {
+      failOfficialBuild("invalid-build");
+      return {};
+    }
+    return { "X-Toontown-Build": buildId };
+  }
+
+  let officialPageContext = true;
+  /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
+  if (isLocalDevelopmentPage()) officialPageContext = false;
+  /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
+  if (officialPageContext) {
+    if (window.location.origin !== OFFICIAL_ORIGIN) {
+      failOfficialBuild("wrong-origin");
+    } else {
+      try {
+        if (window.top !== window.self) failOfficialBuild("embedded-client");
+      } catch {
+        failOfficialBuild("embedded-client");
+      }
+    }
+  }
 
   function base64url(bytes) {
     let binary = "";
@@ -95,6 +173,19 @@
 
   function configure(value = {}) {
     required = value.required === true;
+    if (
+      required &&
+      (
+        value.officialOrigin !== OFFICIAL_ORIGIN ||
+        !RELEASE.test(value.buildId ?? "") ||
+        value.buildId !== value.release ||
+        value.attestationRequired !== true ||
+        value.attestationProtocol !== OFFICIAL_BUILD_PROTOCOL
+      )
+    ) {
+      failOfficialBuild("invalid-build");
+      return false;
+    }
     if (typeof value.release === "string" && RELEASE.test(value.release)) {
       if (release && release !== value.release) {
         authorization = undefined;
@@ -111,6 +202,7 @@
       pendingChallenge = value.challenge;
     }
     diagnostics.configuredAt = performance.now();
+    return !fatalReason;
   }
 
   function primeChallenge(value) {
@@ -126,9 +218,15 @@
       method: "POST",
       cache: "no-store",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...bootstrapHeaders(release),
+      },
       body: "{}",
     });
+    if (!officialResponse(response, "invalid-build")) {
+      throw new Error("Official build attestation is required");
+    }
     if (!response.ok) {
       throw new Error(`Runtime challenge failed with ${response.status}`);
     }
@@ -145,7 +243,7 @@
     const keyPair = await keyPromise;
     const publicKey = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
     const message = encoder.encode([
-      "toontown-browser-runtime-registration-v1",
+      "toontown-browser-runtime-registration-v2",
       challenge.challenge,
       challenge.release,
       window.location.origin,
@@ -159,7 +257,10 @@
       method: "POST",
       cache: "no-store",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...bootstrapHeaders(release),
+      },
       body: JSON.stringify({
         challengeToken: challenge.challengeToken,
         publicKey: {
@@ -171,6 +272,9 @@
         signature: base64url(signature),
       }),
     });
+    if (!officialResponse(response, "invalid-attestation")) {
+      throw new Error("Official build attestation is required");
+    }
     if (!response.ok) {
       throw new Error(`Runtime authorization failed with ${response.status}`);
     }
@@ -180,6 +284,12 @@
       value.release !== release ||
       !OPAQUE_TOKEN.test(value.authorization ?? "") ||
       !AUTHORIZATION_ID.test(value.authorizationId ?? "") ||
+      value.officialBuild?.version !== OFFICIAL_BUILD_PROTOCOL ||
+      value.officialBuild.buildId !== release ||
+      !OFFICIAL_BUILD_TOKEN.test(value.officialBuild.attestation ?? "") ||
+      !AUTHORIZATION_ID.test(value.officialBuild.attestationId ?? "") ||
+      !Number.isFinite(value.officialBuild.expiresAt) ||
+      value.officialBuild.expiresAt <= Date.now() + AUTHORIZATION_REFRESH_MS ||
       !Number.isFinite(value.expiresAt) ||
       value.expiresAt <= Date.now() + AUTHORIZATION_REFRESH_MS
     ) {
@@ -191,6 +301,9 @@
   }
 
   async function prepare({ force = false } = {}) {
+    if (fatalReason) {
+      throw new Error("Official build attestation is required");
+    }
     if (
       !required
       /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
@@ -202,6 +315,13 @@
         release,
         local: true,
         authorizationId: "0".repeat(32),
+        officialBuild: Object.freeze({
+          version: OFFICIAL_BUILD_PROTOCOL,
+          buildId: release,
+          attestation: "",
+          attestationId: "0".repeat(32),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+        }),
         expiresAt: Number.MAX_SAFE_INTEGER,
       });
     }
@@ -242,6 +362,9 @@
   }
 
   async function signedRequest(pathname, bodyObject, { retry = true } = {}) {
+    if (fatalReason) {
+      throw new Error("Official build attestation is required");
+    }
     if (
       !required
       /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
@@ -260,15 +383,17 @@
     const body = JSON.stringify(bodyObject);
     const timestamp = String(Math.floor(Date.now() / 1_000));
     const nonce = randomNonce();
+    const officialBuildId = current.officialBuild.attestationId;
     const bodyHash = await sha256Hex(encoder.encode(body));
     const message = encoder.encode([
-      "toontown-browser-request-proof-v1",
+      "toontown-browser-request-proof-v2",
       "POST",
       pathname,
       timestamp,
       nonce,
       bodyHash,
       current.authorizationId,
+      officialBuildId,
     ].join("\n"));
     const keyPair = await keyPromise;
     const signature = await crypto.subtle.sign(
@@ -285,12 +410,17 @@
         "Content-Type": "application/json",
         "X-Toontown-Authority": current.authorization,
         "X-Toontown-Authority-Id": current.authorizationId,
+        "X-Toontown-Official-Build":
+          current.officialBuild.attestation,
+        "X-Toontown-Official-Build-Id": officialBuildId,
+        "X-Toontown-Build": current.officialBuild.buildId,
         "X-Toontown-Proof-Time": timestamp,
         "X-Toontown-Proof-Nonce": nonce,
         "X-Toontown-Proof": base64url(signature),
       },
       body,
     });
+    if (!officialResponse(response, "invalid-attestation")) return response;
     if (retry && [401, 403, 409].includes(response.status)) {
       await prepare({ force: true });
       return signedRequest(pathname, bodyObject, { retry: false });
@@ -334,6 +464,7 @@
     if (
       value?.version !== PROTOCOL ||
       value.release !== release ||
+      value.officialBuildId !== authorization?.officialBuild.attestationId ||
       !Array.isArray(value.capabilities) ||
       value.capabilities.length !== missing.length
     ) {
@@ -344,7 +475,9 @@
         !Number.isSafeInteger(capability?.zoneId) ||
         !missing.includes(capability.zoneId) ||
         typeof capability.capability !== "string" ||
-        !/^rw1(?:\.[A-Za-z0-9_-]+){3}$/.test(capability.capability) ||
+        !/^rw2(?:\.[A-Za-z0-9_-]+){3}$/.test(capability.capability) ||
+        capability.officialBuildId !==
+          authorization?.officialBuild.attestationId ||
         !Number.isFinite(capability.expiresAt) ||
         capability.expiresAt <= Date.now() ||
         !Array.isArray(capability.requiredPhases)
@@ -406,8 +539,9 @@
     }
     const value = await response.json();
     if (
-      value?.version !== PROTOCOL ||
+      value?.version !== GAME_PROTOCOL ||
       value.release !== release ||
+      value.officialBuildId !== authorization?.officialBuild.attestationId ||
       !Array.isArray(value.modules) ||
       value.modules.length !== missing.length
     ) {
@@ -424,6 +558,7 @@
         !/^[a-f0-9]{64}$/.test(module.moduleDigest) ||
         module.moduleDigest !== calculatedDigest ||
         module.marker !== state.marker ||
+        module.officialBuildId !== state.officialBuildId ||
         !module.module ||
         typeof module.module !== "object" ||
         !Number.isFinite(module.expiresAt) ||
@@ -438,8 +573,10 @@
 
   function validGameSession(value) {
     return (
-      value?.version === PROTOCOL &&
+      value?.version === GAME_PROTOCOL &&
       value.release === release &&
+      value.officialBuildId === authorization?.officialBuild.attestationId &&
+      AUTHORIZATION_ID.test(value.officialBuildId ?? "") &&
       GAME_STATE_TOKEN.test(value.stateToken ?? "") &&
       /^[A-Za-z0-9_-]{22}$/.test(value.marker ?? "") &&
       Number.isSafeInteger(value.sequence) &&
@@ -514,8 +651,9 @@
       }
       const value = await response.json();
       if (
-        value?.version !== PROTOCOL ||
+        value?.version !== GAME_PROTOCOL ||
         value.release !== release ||
+        value.officialBuildId !== state.officialBuildId ||
         value.action !== action ||
         !GAME_TRANSITION_TOKEN.test(value.capability ?? "") ||
         !Number.isFinite(value.expiresAt) ||
@@ -588,11 +726,17 @@
         authorization?.expiresAt > Date.now() + AUTHORIZATION_REFRESH_MS,
       ),
       authorizationExpiresAt: authorization?.expiresAt,
+      officialBuildId: authorization?.officialBuild.attestationId,
+      fatalReason,
       worldCapabilities: worldCapabilities.size,
       gameSessionReady: validGameSession(gameSession),
       gameSequence: gameSession?.sequence,
       transitionResults: transitionResults.size,
       featureModules: featureModules.size,
     }),
+    bootstrapHeaders,
+    failOfficialBuild,
+    inspectOfficialResponse: officialResponse,
+    isFatal: () => Boolean(fatalReason),
   });
 })();

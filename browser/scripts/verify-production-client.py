@@ -40,6 +40,27 @@ def main():
         failures.append("app.js: signed gateway lease path is missing")
     if "async function createAuthorization" not in authority:
         failures.append("runtime-authority.js: proof-of-possession path is missing")
+    for token in (
+        'const OFFICIAL_ORIGIN = "https://toontown.lui.ss"',
+        "function failOfficialBuild",
+        "X-Toontown-Official-Build",
+        "X-Toontown-Official-Build-Id",
+        "toontown-browser-request-proof-v2",
+    ):
+        if token not in authority:
+            failures.append(
+                f"runtime-authority.js: official-build guard is missing {token!r}"
+            )
+    if '"X-Toontown-Build": buildId' not in authority:
+        failures.append(
+            "runtime-authority.js: bootstrap build identity is missing"
+        )
+    for token in (
+        "config.attestationRequired !== true",
+        "config.attestationProtocol !== 1",
+    ):
+        if token not in app:
+            failures.append(f"app.js: official-build check is missing {token!r}")
 
     package = args.dist_dir / "open-toontown.data"
     if not package.is_file():

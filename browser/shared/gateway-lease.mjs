@@ -5,13 +5,14 @@ import {
   randomBytes,
 } from "node:crypto";
 
-const LEASE_VERSION = "v1";
-const LEASE_AAD = Buffer.from("toontown-browser-gateway-lease-v1", "utf8");
+const LEASE_VERSION = "v2";
+const LEASE_AAD = Buffer.from("toontown-browser-gateway-lease-v2", "utf8");
 export const DEFAULT_GATEWAY_LEASE_TTL_SECONDS = 5 * 60;
 export const MAX_GATEWAY_LEASE_TTL_SECONDS = 10 * 60;
 const CLOCK_SKEW_SECONDS = 15;
 const RESUME_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const SESSION_PATTERN = /^[a-f0-9]{32}$/;
+const RELEASE_PATTERN = /^[a-f0-9]{64}$/;
 
 function decodeSecret(value) {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value)) {
@@ -46,6 +47,8 @@ function requireContext({
   userAgent,
   origin,
   authorityKey,
+  buildId,
+  officialBuildId,
 }) {
   if (typeof sessionKey !== "string" || !SESSION_PATTERN.test(sessionKey)) {
     throw new Error("A valid bootstrap session key is required");
@@ -87,6 +90,15 @@ function requireContext({
   ) {
     throw new Error("A valid runtime authority key is required");
   }
+  if (typeof buildId !== "string" || !RELEASE_PATTERN.test(buildId)) {
+    throw new Error("A valid official build id is required");
+  }
+  if (
+    typeof officialBuildId !== "string" ||
+    !SESSION_PATTERN.test(officialBuildId)
+  ) {
+    throw new Error("A valid official build attestation id is required");
+  }
   return {
     s: sessionKey,
     r: resumeToken,
@@ -94,6 +106,8 @@ function requireContext({
     ua: digest(userAgent),
     o: origin,
     a: authorityKey,
+    b: buildId,
+    ob: officialBuildId,
   };
 }
 
@@ -109,6 +123,8 @@ export function createGatewayLease({
   userAgent,
   origin,
   authorityKey,
+  buildId,
+  officialBuildId,
   now = Date.now(),
   ttlSeconds = DEFAULT_GATEWAY_LEASE_TTL_SECONDS,
 }) {
@@ -124,7 +140,7 @@ export function createGatewayLease({
   }
   const issuedAt = Math.floor(now / 1_000);
   const payload = {
-    v: 1,
+    v: 2,
     iat: issuedAt,
     exp: issuedAt + ttlSeconds,
     n: randomBytes(16).toString("base64url"),
@@ -135,6 +151,8 @@ export function createGatewayLease({
       userAgent,
       origin,
       authorityKey,
+      buildId,
+      officialBuildId,
     }),
   };
   const iv = randomBytes(12);
@@ -200,7 +218,7 @@ export function verifyGatewayLease(
     const payload = openGatewayLease(token, secret);
     const current = Math.floor(now / 1_000);
     return (
-      payload?.v === 1 &&
+      payload?.v === 2 &&
       Number.isSafeInteger(payload.iat) &&
       Number.isSafeInteger(payload.exp) &&
       payload.iat <= current + CLOCK_SKEW_SECONDS &&
@@ -214,7 +232,9 @@ export function verifyGatewayLease(
       payload.ip === expected.ip &&
       payload.ua === expected.ua &&
       payload.o === expected.o &&
-      payload.a === expected.a
+      payload.a === expected.a &&
+      payload.b === expected.b &&
+      payload.ob === expected.ob
     );
   } catch {
     return false;
@@ -226,6 +246,8 @@ export function gatewayReconnectIdentity({
   userAgent,
   origin,
   authorityKey,
+  buildId,
+  officialBuildId,
 }) {
   if (typeof sessionKey !== "string" || !SESSION_PATTERN.test(sessionKey)) {
     return null;
@@ -248,10 +270,21 @@ export function gatewayReconnectIdentity({
   ) {
     return null;
   }
+  if (typeof buildId !== "string" || !RELEASE_PATTERN.test(buildId)) {
+    return null;
+  }
+  if (
+    typeof officialBuildId !== "string" ||
+    !SESSION_PATTERN.test(officialBuildId)
+  ) {
+    return null;
+  }
   return Object.freeze({
     sessionKey,
     userAgentDigest: digest(userAgent),
     origin,
     authorityKey,
+    buildId,
+    officialBuildId,
   });
 }

@@ -40,6 +40,21 @@ function json(status, value) {
   });
 }
 
+function officialOriginRequired() {
+  return new Response(JSON.stringify({
+    error: "OFFICIAL_ORIGIN_REQUIRED",
+    officialUrl: "https://toontown.lui.ss/",
+  }), {
+    status: 403,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+      "X-Toontown-Official-Error": "1",
+    },
+  });
+}
+
 function cookieValue(request, name) {
   const header = request.headers.get("cookie") || "";
   for (const part of header.split(";")) {
@@ -108,7 +123,7 @@ async function digestText(value) {
 }
 
 function validTicket(ticket, request, session, nowSeconds) {
-  if (!ticket || ![1, 2].includes(ticket.version)) return false;
+  if (!ticket || ticket.version !== 3) return false;
   if (
     !Number.isSafeInteger(ticket.expiresAt) ||
     ticket.expiresAt < nowSeconds ||
@@ -123,12 +138,16 @@ function validTicket(ticket, request, session, nowSeconds) {
     return false;
   }
   if (
-    ticket.version === 2 &&
-    (
-      typeof ticket.authority !== "string" ||
-      !/^[a-f0-9]{32}$/.test(ticket.authority) ||
-      request.headers.get("x-toontown-asset-authority") !== ticket.authority
-    )
+    typeof ticket.authority !== "string" ||
+    !/^[a-f0-9]{32}$/.test(ticket.authority) ||
+    request.headers.get("x-toontown-asset-authority") !== ticket.authority ||
+    typeof ticket.build !== "string" ||
+    !/^[a-f0-9]{64}$/.test(ticket.build) ||
+    request.headers.get("x-toontown-build") !== ticket.build ||
+    typeof ticket.officialBuild !== "string" ||
+    !/^[a-f0-9]{32}$/.test(ticket.officialBuild) ||
+    request.headers.get("x-toontown-official-build-id") !==
+      ticket.officialBuild
   ) {
     return false;
   }
@@ -149,7 +168,7 @@ function validTicket(ticket, request, session, nowSeconds) {
     : undefined;
   if (!match) return false;
   const expectedObject = `${ticket.name}${ticket.contentEncoding === "gzip" ? ".gz" : ""}`;
-  return match[2] === expectedObject;
+  return match[1] === ticket.build && match[2] === expectedObject;
 }
 
 async function budgetRequest(namespace, name, payload) {
@@ -260,6 +279,14 @@ export default {
         headers: { Allow: "GET, HEAD", "Cache-Control": "private, no-store" },
       });
     }
+    const requestOrigin = request.headers.get("origin");
+    const fetchSite = request.headers.get("sec-fetch-site");
+    if (
+      (requestOrigin && requestOrigin !== environment.PUBLIC_ORIGIN) ||
+      (fetchSite && fetchSite !== "same-origin")
+    ) {
+      return officialOriginRequired();
+    }
 
     const bootstrapCookie = cookieValue(request, "__Host-toontown_bootstrap");
     const nowSeconds = Math.floor(Date.now() / 1_000);
@@ -279,6 +306,14 @@ export default {
       );
     } catch {
       return text(403, "Invalid asset ticket");
+    }
+    if (
+      ticket?.version !== 3 ||
+      request.headers.get("x-toontown-build") !== ticket.build ||
+      request.headers.get("x-toontown-official-build-id") !==
+        ticket.officialBuild
+    ) {
+      return officialOriginRequired();
     }
     const session = await sessionDigest(bootstrapCookie);
     if (!validTicket(ticket, request, session, nowSeconds)) {
