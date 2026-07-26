@@ -4,3 +4,4 @@ NODE_ENV=production
 # Generate 32 random bytes as base64url and store the real value only in
 # /etc/toontown-browser/environment on the dedicated server:
 # GATEWAY_LEASE_SECRET=
+# RUNTIME_AUTHORITY_SECRET=

@@ -19,6 +19,7 @@
     "test:gateway-limits": "node ./browser/tests/gateway_proxy_limits.mjs",
     "test:gateway-bootstrap": "node ./browser/tests/gateway_bootstrap_session.mjs",
     "test:gateway-lease": "node ./browser/tests/gateway_lease.mjs",
+    "test:runtime-authority": "node ./browser/tests/runtime_authority.mjs",
     "test:bootstrap-session": "node ./browser/tests/bootstrap_session.mjs",
     "test:bootstrap-production": "node ./browser/tests/bootstrap_production_smoke.mjs",
     "test:r2-assets": "node ./browser/tests/r2_assets.mjs",

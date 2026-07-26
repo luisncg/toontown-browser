@@ -17,6 +17,15 @@ import {
   validateGatewayLeaseSecret,
 } from "../shared/gateway-lease.mjs";
 import { createR2AssetStoreFromEnvironment } from "../shared/r2-assets.mjs";
+import {
+  createRuntimeAuthorization,
+  createRuntimeChallenge,
+  createWorldCapability,
+  RUNTIME_AUTHORITY_PROTOCOL,
+  validateRuntimeAuthoritySecret,
+  verifyRuntimeRegistration,
+  verifyRuntimeRequestProof,
+} from "../shared/runtime-authority.mjs";
 
 const root = resolve(process.argv[2] ?? "dist-web");
 const projectRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -28,6 +37,7 @@ const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY ?? "";
 const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY ?? "";
 const sessionSecret = process.env.TURNSTILE_SESSION_SECRET ?? "";
 const gatewayLeaseSecret = process.env.GATEWAY_LEASE_SECRET ?? "";
+const runtimeAuthoritySecret = process.env.RUNTIME_AUTHORITY_SECRET ?? "";
 const VERIFY_WINDOW_MS = 60_000;
 const VERIFY_LIMIT = 10;
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
@@ -41,12 +51,25 @@ const MAX_ASSET_TICKET_BODY_BYTES = 8 * 1024;
 const MAX_ASSET_TICKET_BATCH = 32;
 const GATEWAY_LEASE_WINDOW_MS = 60_000;
 const GATEWAY_LEASE_LIMIT = 12;
+const RUNTIME_CHALLENGE_WINDOW_MS = 60_000;
+const RUNTIME_CHALLENGE_LIMIT = 20;
+const RUNTIME_AUTHORIZE_WINDOW_MS = 60_000;
+const RUNTIME_AUTHORIZE_LIMIT = 12;
+const WORLD_CAPABILITY_WINDOW_MS = 60_000;
+const WORLD_CAPABILITY_LIMIT = 30;
+const MAX_RUNTIME_BODY_BYTES = 16 * 1024;
+const MAX_WORLD_CAPABILITY_ZONES = 16;
 const PRIVATE_ASSET_NAME =
   /^(?:open-toontown\.(?:data|wasm)|phase-[a-z0-9.-]+\.data|audio-bank-[a-z0-9.-]+\.data)$/;
 const verifyWindows = new Map();
 const performanceWindows = new Map();
 const assetTicketWindows = new Map();
 const gatewayLeaseWindows = new Map();
+const runtimeChallengeWindows = new Map();
+const runtimeAuthorizeWindows = new Map();
+const worldCapabilityWindows = new Map();
+const runtimeChallengeUses = new Map();
+const runtimeProofUses = new Map();
 const r2AssetStore = createR2AssetStoreFromEnvironment({
   environment: process.env,
   webRoot: root,
@@ -94,6 +117,7 @@ if (production) {
     );
   }
   validateGatewayLeaseSecret(gatewayLeaseSecret);
+  validateRuntimeAuthoritySecret(runtimeAuthoritySecret);
 }
 
 function assetFallbacks(relative) {
@@ -174,7 +198,7 @@ function consumeWindow(windows, key, duration, limit, now = Date.now()) {
   return window.count <= limit;
 }
 
-function readJsonBody(request, maximumBytes = MAX_REQUEST_BODY_BYTES) {
+function readJsonBodyWithRaw(request, maximumBytes = MAX_REQUEST_BODY_BYTES) {
   return new Promise((resolveBody, rejectBody) => {
     let size = 0;
     let tooLarge = false;
@@ -195,13 +219,21 @@ function readJsonBody(request, maximumBytes = MAX_REQUEST_BODY_BYTES) {
         return;
       }
       try {
-        resolveBody(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        const raw = Buffer.concat(chunks);
+        resolveBody({
+          value: JSON.parse(raw.toString("utf8")),
+          raw,
+        });
       } catch {
         rejectBody(new Error("invalid JSON"));
       }
     });
     request.on("error", rejectBody);
   });
+}
+
+async function readJsonBody(request, maximumBytes = MAX_REQUEST_BODY_BYTES) {
+  return (await readJsonBodyWithRaw(request, maximumBytes)).value;
 }
 
 function bootstrapCookieValue(headers) {
@@ -226,6 +258,76 @@ function privateAssetSessionId(request) {
   const session = bootstrapCookieValue(request.headers);
   const source = session || `local:${requestIp(request)}`;
   return createHash("sha256").update(source).digest("hex").slice(0, 32);
+}
+
+function runtimeRelease() {
+  return r2AssetStore?.release ?? "0".repeat(64);
+}
+
+function runtimeContext(request, sessionKey = bootstrapSessionDigest(
+  request.headers,
+)) {
+  return {
+    sessionKey,
+    release: runtimeRelease(),
+    clientAddress: requestIp(request),
+    userAgent: String(request.headers["user-agent"] ?? "").slice(0, 1_024),
+    origin: publicOrigin,
+  };
+}
+
+function consumeOneUse(store, key, expiresAt, now = Date.now()) {
+  for (const [candidate, expiry] of store) {
+    if (expiry <= now) store.delete(candidate);
+  }
+  if (store.has(key)) return false;
+  store.set(key, expiresAt);
+  return true;
+}
+
+function runtimeChallengeFor(request, sessionKey) {
+  return createRuntimeChallenge({
+    secret: runtimeAuthoritySecret,
+    ...runtimeContext(request, sessionKey),
+  });
+}
+
+function verifyRuntimeProof(request, pathname, rawBody) {
+  if (!production) {
+    return Object.freeze({
+      authorizationId: "0".repeat(32),
+      release: runtimeRelease(),
+      expiresAt: Number.MAX_SAFE_INTEGER,
+    });
+  }
+  const proof = verifyRuntimeRequestProof({
+    secret: runtimeAuthoritySecret,
+    authorization: request.headers["x-toontown-authority"],
+    signature: request.headers["x-toontown-proof"],
+    timestamp: request.headers["x-toontown-proof-time"],
+    nonce: request.headers["x-toontown-proof-nonce"],
+    method: request.method,
+    pathname,
+    body: rawBody,
+    context: runtimeContext(request),
+  });
+  if (
+    !proof ||
+    request.headers["x-toontown-authority-id"] !== proof.authorizationId ||
+    !consumeOneUse(runtimeProofUses, proof.replayKey, proof.expiresAt)
+  ) {
+    return null;
+  }
+  return proof;
+}
+
+function requiredPhasesForZone(zoneId) {
+  // This is deliberately conservative during the observe-only foundation
+  // rollout. More specific phase/content composition moves server-side as
+  // individual world systems are migrated.
+  const phases = ["4"];
+  if (zoneId >= 20_000 && zoneId < 23_000) phases.push("5");
+  return phases;
 }
 
 function finiteNumber(value, minimum, maximum, precision = 0) {
@@ -1088,8 +1190,223 @@ async function verifyTurnstile(request, response) {
     return;
   }
 
-  const cookie = bootstrapCookieHeader(createBootstrapSession(sessionSecret));
-  json(response, 200, { ok: true }, { "Set-Cookie": cookie });
+  const sessionValue = createBootstrapSession(sessionSecret);
+  const sessionKey = createHash("sha256")
+    .update(sessionValue)
+    .digest("hex")
+    .slice(0, 32);
+  const cookie = bootstrapCookieHeader(sessionValue);
+  json(
+    response,
+    200,
+    {
+      ok: true,
+      runtime: runtimeChallengeFor(request, sessionKey),
+    },
+    { "Set-Cookie": cookie },
+  );
+}
+
+async function issueRuntimeChallenge(request, response) {
+  if (request.method !== "POST") {
+    json(response, 405, { ok: false }, { Allow: "POST" });
+    return;
+  }
+  if (
+    !production ||
+    !verifyBootstrapSession(request.headers, sessionSecret)
+  ) {
+    json(response, 401, { ok: false });
+    return;
+  }
+  if (request.headers.origin !== publicOrigin) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  const sessionKey = bootstrapSessionDigest(request.headers);
+  if (!consumeWindow(
+    runtimeChallengeWindows,
+    sessionKey,
+    RUNTIME_CHALLENGE_WINDOW_MS,
+    RUNTIME_CHALLENGE_LIMIT,
+  )) {
+    json(response, 429, { ok: false });
+    return;
+  }
+  try {
+    const { value } = await readJsonBodyWithRaw(
+      request,
+      MAX_RUNTIME_BODY_BYTES,
+    );
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      Object.keys(value).length !== 0
+    ) {
+      json(response, 400, { ok: false });
+      return;
+    }
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  try {
+    json(response, 200, runtimeChallengeFor(request, sessionKey));
+  } catch {
+    json(response, 503, { ok: false });
+  }
+}
+
+async function issueRuntimeAuthorization(request, response) {
+  if (request.method !== "POST") {
+    json(response, 405, { ok: false }, { Allow: "POST" });
+    return;
+  }
+  if (
+    !production ||
+    !verifyBootstrapSession(request.headers, sessionSecret)
+  ) {
+    json(response, 401, { ok: false });
+    return;
+  }
+  if (request.headers.origin !== publicOrigin) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  const sessionKey = bootstrapSessionDigest(request.headers);
+  if (!consumeWindow(
+    runtimeAuthorizeWindows,
+    sessionKey,
+    RUNTIME_AUTHORIZE_WINDOW_MS,
+    RUNTIME_AUTHORIZE_LIMIT,
+  )) {
+    json(response, 429, { ok: false });
+    return;
+  }
+  let body;
+  try {
+    body = await readJsonBody(request, MAX_RUNTIME_BODY_BYTES);
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  if (
+    !body ||
+    typeof body.challengeToken !== "string" ||
+    !body.publicKey ||
+    typeof body.signature !== "string"
+  ) {
+    json(response, 400, { ok: false });
+    return;
+  }
+  const registration = verifyRuntimeRegistration({
+    challengeToken: body.challengeToken,
+    publicKey: body.publicKey,
+    signature: body.signature,
+    secret: runtimeAuthoritySecret,
+    context: runtimeContext(request, sessionKey),
+  });
+  if (
+    !registration ||
+    !consumeOneUse(
+      runtimeChallengeUses,
+      registration.challengeId,
+      registration.expiresAt,
+    )
+  ) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  try {
+    json(response, 200, createRuntimeAuthorization({
+      secret: runtimeAuthoritySecret,
+      publicKey: registration.publicKey,
+      ...runtimeContext(request, sessionKey),
+    }));
+  } catch {
+    json(response, 503, { ok: false });
+  }
+}
+
+async function issueWorldCapabilities(request, response) {
+  if (request.method !== "POST") {
+    json(response, 405, { ok: false }, { Allow: "POST" });
+    return;
+  }
+  if (
+    production &&
+    !verifyBootstrapSession(request.headers, sessionSecret)
+  ) {
+    json(response, 401, { ok: false });
+    return;
+  }
+  if (production && request.headers.origin !== publicOrigin) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  let body;
+  let raw;
+  try {
+    ({ value: body, raw } = await readJsonBodyWithRaw(
+      request,
+      MAX_RUNTIME_BODY_BYTES,
+    ));
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  const proof = verifyRuntimeProof(
+    request,
+    "/api/runtime/world-capabilities",
+    raw,
+  );
+  if (!proof) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  if (
+    !body ||
+    !Array.isArray(body.zoneIds) ||
+    body.zoneIds.length < 1 ||
+    body.zoneIds.length > MAX_WORLD_CAPABILITY_ZONES ||
+    body.zoneIds.some((zoneId) => (
+      !Number.isSafeInteger(zoneId) || zoneId < 0 || zoneId > 99_999_999
+    )) ||
+    new Set(body.zoneIds).size !== body.zoneIds.length
+  ) {
+    json(response, 400, { ok: false });
+    return;
+  }
+  if (!consumeWindow(
+    worldCapabilityWindows,
+    proof.authorizationId,
+    WORLD_CAPABILITY_WINDOW_MS,
+    WORLD_CAPABILITY_LIMIT,
+  )) {
+    json(response, 429, { ok: false });
+    return;
+  }
+  const context = runtimeContext(request);
+  try {
+    const capabilities = body.zoneIds.map((zoneId) =>
+      createWorldCapability({
+        secret: runtimeAuthoritySecret,
+        authorizationId: proof.authorizationId,
+        zoneId,
+        requiredPhases: requiredPhasesForZone(zoneId),
+        contentEpoch: `world-v1-${context.release.slice(0, 12)}`,
+        ...context,
+      })
+    );
+    json(response, 200, {
+      version: RUNTIME_AUTHORITY_PROTOCOL,
+      release: context.release,
+      capabilities,
+    });
+  } catch {
+    json(response, 503, { ok: false });
+  }
 }
 
 async function issueAssetTickets(request, response) {
@@ -1121,14 +1438,23 @@ async function issueAssetTickets(request, response) {
   }
 
   let body;
+  let raw;
   try {
-    body = await readJsonBody(request, MAX_ASSET_TICKET_BODY_BYTES);
+    ({ value: body, raw } = await readJsonBodyWithRaw(
+      request,
+      MAX_ASSET_TICKET_BODY_BYTES,
+    ));
   } catch (error) {
     json(
       response,
       error?.message === "request body too large" ? 413 : 400,
       { ok: false },
     );
+    return;
+  }
+  const proof = verifyRuntimeProof(request, "/api/assets/tickets", raw);
+  if (!proof) {
+    json(response, 403, { ok: false });
     return;
   }
   if (
@@ -1157,14 +1483,23 @@ async function issueAssetTickets(request, response) {
         "GET",
         request.headers["accept-encoding"],
         session,
+        proof.authorizationId,
       );
       if (!url) throw new Error("unknown asset");
-      return { name, url };
+      return {
+        name,
+        url,
+        authority: proof.authorizationId,
+      };
     }));
     json(
       response,
       200,
-      { version: 1, tickets },
+      {
+        version: production ? 2 : 1,
+        release: runtimeRelease(),
+        tickets,
+      },
       { Vary: "Accept-Encoding" },
     );
   } catch (error) {
@@ -1197,6 +1532,32 @@ async function issueGatewayLease(request, response) {
     return;
   }
 
+  let body;
+  let raw;
+  try {
+    ({ value: body, raw } = await readJsonBodyWithRaw(
+      request,
+      MAX_RUNTIME_BODY_BYTES,
+    ));
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    Object.keys(body).length !== 0
+  ) {
+    json(response, 400, { ok: false });
+    return;
+  }
+  const proof = verifyRuntimeProof(request, "/api/gateway/lease", raw);
+  if (!proof) {
+    json(response, 403, { ok: false });
+    return;
+  }
+
   const sessionKey = bootstrapSessionDigest(request.headers);
   if (!consumeWindow(
     gatewayLeaseWindows,
@@ -1223,12 +1584,14 @@ async function issueGatewayLease(request, response) {
       clientAddress: requestIp(request),
       userAgent,
       origin: publicOrigin,
+      authorityKey: proof.authorizationId,
       now: issuedAt,
     });
     json(response, 200, {
-      version: 1,
+      version: 2,
       resume,
       lease,
+      authority: proof.authorizationId,
       expiresAt:
         issuedAt + DEFAULT_GATEWAY_LEASE_TTL_SECONDS * 1_000,
     });
@@ -1243,6 +1606,7 @@ function isPublicBootstrapPath(pathname) {
     "/favicon.ico",
     "/index.html",
     "/app.js",
+    "/runtime-authority.js",
     "/welcome-gate.js",
     "/secure-asset-cache.js",
     "/short-audio-banks.js",
@@ -1365,15 +1729,27 @@ export function createWebServer() {
     if (pathname === "/api/bootstrap/config") {
       json(response, 200, {
         required: production,
+        authorityRequired: production,
+        authorityProtocol: RUNTIME_AUTHORITY_PROTOCOL,
+        release: runtimeRelease(),
         ...(production ? { siteKey: turnstileSiteKey } : {}),
       });
       return;
     }
     if (pathname === "/api/bootstrap/session") {
+      const valid =
+        !production ||
+        verifyBootstrapSession(request.headers, sessionSecret);
       json(response, 200, {
-        valid:
-          !production ||
-          verifyBootstrapSession(request.headers, sessionSecret),
+        valid,
+        ...(production && valid
+          ? {
+            runtime: runtimeChallengeFor(
+              request,
+              bootstrapSessionDigest(request.headers),
+            ),
+          }
+          : {}),
       });
       return;
     }
@@ -1383,6 +1759,18 @@ export function createWebServer() {
       } else {
         await verifyTurnstile(request, response);
       }
+      return;
+    }
+    if (pathname === "/api/runtime/challenge") {
+      await issueRuntimeChallenge(request, response);
+      return;
+    }
+    if (pathname === "/api/runtime/authorize") {
+      await issueRuntimeAuthorization(request, response);
+      return;
+    }
+    if (pathname === "/api/runtime/world-capabilities") {
+      await issueWorldCapabilities(request, response);
       return;
     }
     if (pathname === "/api/performance") {
@@ -1417,6 +1805,17 @@ export function createWebServer() {
       json(response, 401, { ok: false });
       return;
     }
+    if (
+      production &&
+      r2AssetStore &&
+      PRIVATE_ASSET_NAME.test(pathname.slice(1))
+    ) {
+      json(response, 401, {
+        ok: false,
+        error: "opaque asset ticket required",
+      });
+      return;
+    }
     // Gzip sidecars are an internal representation selected from the base
     // asset request. Never let a verified client bypass the private gateway
     // by spelling the physical .gz filename directly.
@@ -1435,6 +1834,7 @@ export function createWebServer() {
           request.method,
           request.headers["accept-encoding"],
           privateAssetSessionId(request),
+          "0".repeat(32),
         );
         if (location) {
           response.writeHead(307, {

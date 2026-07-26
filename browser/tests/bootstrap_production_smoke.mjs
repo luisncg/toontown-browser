@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import {
+  generateKeyPairSync,
+  randomBytes,
+  sign as signValue,
+} from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -12,6 +17,10 @@ import {
   createBootstrapSession,
 } from "../shared/bootstrap-session.mjs";
 import { verifyGatewayLease } from "../shared/gateway-lease.mjs";
+import {
+  runtimeRegistrationMessage,
+  runtimeRequestMessage,
+} from "../shared/runtime-authority.mjs";
 
 async function availablePort() {
   const probe = createServer();
@@ -53,8 +62,13 @@ const publicOrigin = "https://toontown.lui.ss";
 const secret = "production-smoke-secret-with-at-least-thirty-two-characters";
 const assetTicketSecret = Buffer.alloc(32, 13).toString("base64url");
 const gatewayLeaseSecret = Buffer.alloc(32, 23).toString("base64url");
+const runtimeAuthoritySecret = Buffer.alloc(32, 31).toString("base64url");
 await writeFile(join(fixture, "index.html"), "bootstrap");
 await writeFile(join(fixture, "app.js"), "bootstrap-app");
+await writeFile(
+  join(fixture, "runtime-authority.js"),
+  "bootstrap-runtime-authority",
+);
 await writeFile(
   join(fixture, "secure-asset-cache.js"),
   "bootstrap-secure-cache",
@@ -117,6 +131,7 @@ const child = spawn(
       TURNSTILE_SECRET_KEY: "test-private-secret-key",
       TURNSTILE_SESSION_SECRET: secret,
       GATEWAY_LEASE_SECRET: gatewayLeaseSecret,
+      RUNTIME_AUTHORITY_SECRET: runtimeAuthoritySecret,
       ASSET_GATEWAY_ORIGIN: "https://assets.invalid",
       ASSET_GATEWAY_TOKEN_SECRET: assetTicketSecret,
       ASSET_GATEWAY_TTL_SECONDS: "180",
@@ -139,6 +154,9 @@ try {
   );
   assert.deepEqual(config, {
     required: true,
+    authorityRequired: true,
+    authorityProtocol: 1,
+    release,
     siteKey: "test-public-site-key",
   });
   assert.deepEqual(
@@ -148,6 +166,7 @@ try {
     { valid: false },
   );
   assert.equal((await fetch(`${origin}/app.js`)).status, 200);
+  assert.equal((await fetch(`${origin}/runtime-authority.js`)).status, 200);
   assert.equal((await fetch(`${origin}/secure-asset-cache.js`)).status, 200);
   const shortAudioRuntime = await fetch(
     `${origin}/short-audio-banks.js`,
@@ -170,17 +189,160 @@ try {
   const sessionCookie = `${BOOTSTRAP_COOKIE}=${session}`;
   const gatewayClientIp = "198.51.100.77";
   const gatewayUserAgent = "Toontown Browser production smoke/1.0";
-  const leaseRequest = (cookie, originHeader, fetchSite = "same-origin") =>
-    fetch(`${origin}/api/gateway/lease`, {
-      method: "POST",
-      headers: {
-        Cookie: cookie ? `${BOOTSTRAP_COOKIE}=${cookie}` : "",
-        Origin: originHeader,
-        "Sec-Fetch-Site": fetchSite,
-        "X-Toontown-Client-IP": gatewayClientIp,
-        "User-Agent": gatewayUserAgent,
-      },
+  async function createAuthorityClient(
+    cookie,
+    clientIp = gatewayClientIp,
+    userAgent = gatewayUserAgent,
+  ) {
+    const { privateKey, publicKey } = generateKeyPairSync("ec", {
+      namedCurve: "prime256v1",
     });
+    const challengeResponse = await fetch(
+      `${origin}/api/bootstrap/session`,
+      {
+        headers: {
+          Cookie: `${BOOTSTRAP_COOKIE}=${cookie}`,
+          "X-Toontown-Client-IP": clientIp,
+          "User-Agent": userAgent,
+        },
+      },
+    );
+    assert.equal(challengeResponse.status, 200);
+    const sessionState = await challengeResponse.json();
+    assert.equal(sessionState.valid, true);
+    assert.equal(sessionState.runtime.release, release);
+    const signature = signValue(
+      "sha256",
+      runtimeRegistrationMessage({
+        challenge: sessionState.runtime.challenge,
+        release,
+        origin: publicOrigin,
+      }),
+      { key: privateKey, dsaEncoding: "ieee-p1363" },
+    ).toString("base64url");
+    const authorizationResponse = await fetch(
+      `${origin}/api/runtime/authorize`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `${BOOTSTRAP_COOKIE}=${cookie}`,
+          Origin: publicOrigin,
+          "Content-Type": "application/json",
+          "X-Toontown-Client-IP": clientIp,
+          "User-Agent": userAgent,
+        },
+        body: JSON.stringify({
+          challengeToken: sessionState.runtime.challengeToken,
+          publicKey: publicKey.export({ format: "jwk" }),
+          signature,
+        }),
+      },
+    );
+    assert.equal(authorizationResponse.status, 200);
+    const material = await authorizationResponse.json();
+    assert.equal(material.version, 1);
+    assert.equal(material.release, release);
+    assert.match(material.authorizationId, /^[a-f0-9]{32}$/);
+
+    return {
+      material,
+      async request(
+        pathname,
+        bodyValue,
+        {
+          originHeader = publicOrigin,
+          fetchSite = "same-origin",
+          cookieValue = cookie,
+          acceptEncoding,
+        } = {},
+      ) {
+        const body = JSON.stringify(bodyValue);
+        const timestamp = String(Math.floor(Date.now() / 1_000));
+        const nonce = randomBytes(16).toString("base64url");
+        const proof = signValue(
+          "sha256",
+          runtimeRequestMessage({
+            authorizationId: material.authorizationId,
+            method: "POST",
+            pathname,
+            timestamp,
+            nonce,
+            body: Buffer.from(body),
+          }),
+          { key: privateKey, dsaEncoding: "ieee-p1363" },
+        ).toString("base64url");
+        return fetch(`${origin}${pathname}`, {
+          method: "POST",
+          headers: {
+            Cookie: cookieValue
+              ? `${BOOTSTRAP_COOKIE}=${cookieValue}`
+              : "",
+            Origin: originHeader,
+            "Sec-Fetch-Site": fetchSite,
+            "Content-Type": "application/json",
+            "X-Toontown-Client-IP": clientIp,
+            "User-Agent": userAgent,
+            "X-Toontown-Authority": material.authorization,
+            "X-Toontown-Authority-Id": material.authorizationId,
+            "X-Toontown-Proof-Time": timestamp,
+            "X-Toontown-Proof-Nonce": nonce,
+            "X-Toontown-Proof": proof,
+            ...(acceptEncoding
+              ? { "Accept-Encoding": acceptEncoding }
+              : {}),
+          },
+          body,
+        });
+      },
+    };
+  }
+  const authorityClient = await createAuthorityClient(session);
+  assert.equal(
+    (
+      await fetch(`${origin}/api/gateway/lease`, {
+        method: "POST",
+        headers: {
+          Cookie: `${BOOTSTRAP_COOKIE}=${session}`,
+          Origin: publicOrigin,
+          "Sec-Fetch-Site": "same-origin",
+          "Content-Type": "application/json",
+          "X-Toontown-Client-IP": gatewayClientIp,
+          "User-Agent": gatewayUserAgent,
+        },
+        body: "{}",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await fetch(`${origin}/api/assets/tickets`, {
+        method: "POST",
+        headers: {
+          Cookie: `${BOOTSTRAP_COOKIE}=${session}`,
+          Origin: publicOrigin,
+          "Content-Type": "application/json",
+          "X-Toontown-Client-IP": gatewayClientIp,
+          "User-Agent": gatewayUserAgent,
+        },
+        body: JSON.stringify({ names: ["phase-4-part-1.data"] }),
+      })
+    ).status,
+    403,
+  );
+  const leaseRequest = (
+    cookie,
+    originHeader,
+    fetchSite = "same-origin",
+  ) => authorityClient.request(
+    "/api/gateway/lease",
+    {},
+    {
+      cookieValue: cookie,
+      originHeader,
+      fetchSite,
+    },
+  );
   assert.equal((await leaseRequest("", publicOrigin)).status, 401);
   assert.equal(
     (await leaseRequest(session, "https://copied.example")).status,
@@ -194,7 +356,11 @@ try {
   assert.equal(gatewayLeaseResponse.status, 200);
   assert.equal(gatewayLeaseResponse.headers.get("cache-control"), "no-store");
   const gatewayMaterial = await gatewayLeaseResponse.json();
-  assert.equal(gatewayMaterial.version, 1);
+  assert.equal(gatewayMaterial.version, 2);
+  assert.equal(
+    gatewayMaterial.authority,
+    authorityClient.material.authorizationId,
+  );
   assert.match(gatewayMaterial.resume, /^[A-Za-z0-9_-]{32}$/);
   assert.match(
     gatewayMaterial.lease,
@@ -212,22 +378,24 @@ try {
         clientAddress: gatewayClientIp,
         userAgent: gatewayUserAgent,
         origin: publicOrigin,
+        authorityKey: authorityClient.material.authorizationId,
       },
     ),
     true,
   );
 
-  const ticketRequest = (cookie, originHeader, names) => fetch(
-    `${origin}/api/assets/tickets`,
+  const ticketRequest = (
+    cookie,
+    originHeader,
+    names,
+    client = authorityClient,
+  ) => client.request(
+    "/api/assets/tickets",
+    { names },
     {
-      method: "POST",
-      headers: {
-        Cookie: cookie ? `${BOOTSTRAP_COOKIE}=${cookie}` : "",
-        Origin: originHeader,
-        "Content-Type": "application/json",
-        "Accept-Encoding": "gzip",
-      },
-      body: JSON.stringify({ names }),
+      cookieValue: cookie,
+      originHeader,
+      acceptEncoding: "gzip",
     },
   );
   assert.equal(
@@ -267,20 +435,52 @@ try {
   assert.equal(ticketBatchResponse.headers.get("cache-control"), "no-store");
   assert.equal(ticketBatchResponse.headers.get("vary"), "Accept-Encoding");
   const ticketBatch = await ticketBatchResponse.json();
-  assert.equal(ticketBatch.version, 1);
+  assert.equal(ticketBatch.version, 2);
+  assert.equal(ticketBatch.release, release);
   assert.equal(ticketBatch.tickets.length, 1);
   assert.equal(ticketBatch.tickets[0].name, "phase-4-part-1.data");
+  assert.equal(
+    ticketBatch.tickets[0].authority,
+    authorityClient.material.authorizationId,
+  );
   assert.match(ticketBatch.tickets[0].url, /^https:\/\/assets\.invalid\/assets\/v1\./);
   assert.ok(!ticketBatch.tickets[0].url.includes("phase-4"));
   assert.ok(!ticketBatch.tickets[0].url.includes(release));
 
+  const worldCapabilityResponse = await authorityClient.request(
+    "/api/runtime/world-capabilities",
+    { zoneIds: [2_000, 22_000] },
+  );
+  assert.equal(worldCapabilityResponse.status, 200);
+  const worldCapabilities = await worldCapabilityResponse.json();
+  assert.equal(worldCapabilities.version, 1);
+  assert.equal(worldCapabilities.release, release);
+  assert.deepEqual(
+    worldCapabilities.capabilities.map((entry) => entry.zoneId),
+    [2_000, 22_000],
+  );
+  assert.deepEqual(
+    worldCapabilities.capabilities[0].requiredPhases,
+    ["4"],
+  );
+  assert.deepEqual(
+    worldCapabilities.capabilities[1].requiredPhases,
+    ["4", "5"],
+  );
+  for (const capability of worldCapabilities.capabilities) {
+    assert.match(capability.capability, /^rw1(?:\.[A-Za-z0-9_-]+){3}$/);
+    assert.ok(capability.expiresAt > Date.now());
+  }
+
   const rateSession = createBootstrapSession(secret, Date.now() + 1_000);
+  const rateAuthorityClient = await createAuthorityClient(rateSession);
   for (let attempt = 0; attempt < 20; attempt += 1) {
     assert.equal(
       (await ticketRequest(
         rateSession,
         publicOrigin,
         ["phase-4-part-1.data"],
+        rateAuthorityClient,
       )).status,
       200,
     );
@@ -290,6 +490,7 @@ try {
       rateSession,
       publicOrigin,
       ["phase-4-part-1.data"],
+      rateAuthorityClient,
     )).status,
     429,
   );
@@ -842,12 +1043,12 @@ try {
     })).status,
     413,
   );
-  assert.deepEqual(
+  const refreshedSessionState =
     await fetch(`${origin}/api/bootstrap/session`, {
       headers: { Cookie: `${BOOTSTRAP_COOKIE}=${session}` },
-    }).then((response) => response.json()),
-    { valid: true },
-  );
+    }).then((response) => response.json());
+  assert.equal(refreshedSessionState.valid, true);
+  assert.equal(refreshedSessionState.runtime.release, release);
   let runtimeEtag;
   for (const [asset, expectedBody] of protectedAssets) {
     const protectedResponse = await fetch(`${origin}/${asset}`, {
@@ -875,14 +1076,11 @@ try {
       redirect: "manual",
     },
   );
-  assert.equal(compressedData.status, 307);
-  assert.match(
-    compressedData.headers.get("location"),
-    /^https:\/\/assets\.invalid\/assets\/v1\./,
-  );
+  assert.equal(compressedData.status, 401);
+  assert.equal(compressedData.headers.get("location"), null);
   assert.equal(
     compressedData.headers.get("cache-control"),
-    "private, no-store",
+    "no-store",
   );
   const identityData = await fetch(`${origin}/phase-4-part-1.data`, {
     headers: {
@@ -891,11 +1089,8 @@ try {
     },
     redirect: "manual",
   });
-  assert.equal(identityData.status, 307);
-  assert.match(
-    identityData.headers.get("location"),
-    /^https:\/\/assets\.invalid\/assets\/v1\./,
-  );
+  assert.equal(identityData.status, 401);
+  assert.equal(identityData.headers.get("location"), null);
   const etag = runtimeEtag;
   assert.ok(etag);
 

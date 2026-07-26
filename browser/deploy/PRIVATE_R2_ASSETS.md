@@ -9,16 +9,23 @@ private Cloudflare R2 bucket `toontown-browser-assets`.
 2. A verified browser receives the normal secure bootstrap cookie.
 3. Runtime loader JavaScript and phase loader JavaScript remain same-origin on
    the dedicated server so Emscripten keeps the correct path resolution.
-4. Requests for the main `.wasm`, initial `.data`, and phase `.data` files are
+4. During the ordinary boot, the browser creates a non-extractable ECDSA key
+   and exchanges a server-bound challenge for a short-lived runtime
+   authorization tied to the current immutable release.
+5. The browser signs one batched asset-ticket request. The signature covers the
+   exact body, request path, timestamp, one-use nonce, and authorization id.
+6. Requests for the main `.wasm`, initial `.data`, and phase `.data` files are
    checked against a private manifest stored outside the served web root.
-5. The dedicated server returns a non-cacheable `307` redirect containing a
-   three-minute, AES-GCM-encrypted, session-bound opaque ticket. The ticket
-   does not reveal the asset name, release hash, or R2 object key.
-6. A Cloudflare Worker verifies the same signed bootstrap cookie, binds it to
-   the ticket, validates the exact object path, and streams the private R2
-   object through `toontown.lui.ss/assets/*`. The browser never receives R2
-   credentials, an R2 hostname, a presigned S3 URL, or the private manifest.
-7. The browser encrypts completed heavy responses into 4 MiB AES-GCM chunks in
+   Direct heavy-asset paths are rejected even for a verified bootstrap cookie.
+7. The dedicated server returns three-minute, AES-GCM-encrypted,
+   session-and-authority-bound opaque ticket URLs. Tickets do not reveal asset
+   names, release hashes, or R2 object keys.
+8. A Cloudflare Worker verifies the signed bootstrap cookie, ticket session,
+   and matching authority header, validates the exact object path, and streams
+   the private R2 object through `toontown.lui.ss/assets/*`. The browser never
+   receives R2 credentials, an R2 hostname, a presigned S3 URL, or the private
+   manifest.
+9. The browser encrypts completed heavy responses into 4 MiB AES-GCM chunks in
    IndexedDB. Its device key is non-extractable. Old plaintext Emscripten and
    phase caches are removed; if WebCrypto or IndexedDB is unavailable, the
    client uses the network rather than storing plaintext.
@@ -58,6 +65,9 @@ Required variables on the dedicated web origin:
 - `R2_ASSET_MANIFEST_PATH` (an absolute path outside `dist-web`)
 - `GATEWAY_LEASE_SECRET` (a separate 32-byte base64url secret used only by the
   dedicated web origin and its loopback WebSocket gateway)
+- `RUNTIME_AUTHORITY_SECRET` (a separate 32-byte base64url secret used to seal
+  proof-of-possession challenges, runtime authorizations, and world
+  capabilities)
 
 Required secrets/bindings on the Cloudflare Worker:
 

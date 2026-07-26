@@ -33,19 +33,25 @@
     async prepare(names) {
       const requested = [...new Set(names.map(String))];
       if (!requested.length) return { requested: 0, issued: 0 };
-      const response = await nativeFetch("/api/assets/tickets", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ names: requested }),
-      });
+      const authority = window.ToontownRuntimeAuthority;
+      const response = authority
+        ? await authority.signedRequest(
+          "/api/assets/tickets",
+          { names: requested },
+        )
+        : await nativeFetch("/api/assets/tickets", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ names: requested }),
+        });
       if (!response.ok) {
         this.stats.errors += 1;
         throw new Error(`Asset ticket batch failed with ${response.status}`);
       }
       const result = await response.json();
       if (
-        result?.version !== 1 ||
+        ![1, 2].includes(result?.version) ||
         !Array.isArray(result.tickets) ||
         result.tickets.length > requested.length
       ) {
@@ -61,7 +67,14 @@
           typeof ticket.name !== "string" ||
           !requestedNames.has(ticket.name) ||
           issuedNames.has(ticket.name) ||
-          typeof ticket.url !== "string"
+          typeof ticket.url !== "string" ||
+          (
+            result.version === 2 &&
+            (
+              typeof ticket.authority !== "string" ||
+              !/^[a-f0-9]{32}$/.test(ticket.authority)
+            )
+          )
         ) {
           this.stats.errors += 1;
           throw new Error("Asset ticket batch entry is invalid");
@@ -79,7 +92,10 @@
           throw new Error("Asset ticket URL is invalid");
         }
         issuedNames.add(ticket.name);
-        this.urls.set(ticket.name, url.href);
+        this.urls.set(ticket.name, Object.freeze({
+          url: url.href,
+          authority: ticket.authority,
+        }));
       }
       this.stats.batches += 1;
       this.stats.requested += requested.length;
@@ -88,13 +104,18 @@
     }
 
     requestFor(asset) {
-      const url = this.urls.get(asset.assetName);
-      if (!url) return asset.request;
+      const ticket = this.urls.get(asset.assetName);
+      if (!ticket) return asset.request;
       this.stats.uses += 1;
-      return new Request(url, {
+      const headers = new Headers(asset.request.headers);
+      if (ticket.authority) {
+        headers.set("X-Toontown-Asset-Authority", ticket.authority);
+      }
+      return new Request(ticket.url, {
         method: "GET",
         credentials: "same-origin",
         cache: "no-store",
+        headers,
         signal: asset.request.signal,
       });
     }

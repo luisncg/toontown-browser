@@ -33,7 +33,12 @@ if ! find "${SERVER_ENGINE}/panda3d" -maxdepth 1 \
   printf 'The native Linux server engine is missing. Run npm run build:server first.\n' >&2
   exit 1
 fi
-if [[ ! -f "${PROJECT_ROOT}/dist-web/open-toontown.wasm" ]]; then
+if [[ ! -f "${PROJECT_ROOT}/dist-web/open-toontown.wasm" ]] &&
+   ! {
+     [[ "${TOONTOWN_PRODUCTION:-0}" == "1" ]] &&
+     [[ -n "${R2_ASSET_MANIFEST_PATH:-}" ]] &&
+     [[ -s "${R2_ASSET_MANIFEST_PATH}" ]]
+   }; then
   printf 'The browser game is missing. Run npm run build:game on the build Mac first.\n' >&2
   exit 1
 fi

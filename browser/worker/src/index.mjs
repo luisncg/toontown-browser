@@ -76,7 +76,7 @@ async function sessionDigest(value) {
 }
 
 function validTicket(ticket, request, session, nowSeconds) {
-  if (!ticket || ticket.version !== 1) return false;
+  if (!ticket || ![1, 2].includes(ticket.version)) return false;
   if (
     !Number.isSafeInteger(ticket.expiresAt) ||
     ticket.expiresAt < nowSeconds ||
@@ -88,6 +88,16 @@ function validTicket(ticket, request, session, nowSeconds) {
     return false;
   }
   if (ticket.session !== session || !/^[a-f0-9]{32}$/.test(ticket.session)) {
+    return false;
+  }
+  if (
+    ticket.version === 2 &&
+    (
+      typeof ticket.authority !== "string" ||
+      !/^[a-f0-9]{32}$/.test(ticket.authority) ||
+      request.headers.get("x-toontown-asset-authority") !== ticket.authority
+    )
+  ) {
     return false;
   }
   if (!ASSET_NAME.test(ticket.name)) return false;

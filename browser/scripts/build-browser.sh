@@ -301,6 +301,12 @@ RUNTIME_VERSION="$({
   if [[ -f "$DIST_DIR/short-audio-banks.js" ]]; then
     shasum -a 256 "$DIST_DIR/short-audio-banks.js"
   fi
+  if [[ -f "$DIST_DIR/runtime-authority.js" ]]; then
+    shasum -a 256 "$DIST_DIR/runtime-authority.js"
+  fi
+  if [[ -f "$DIST_DIR/secure-asset-cache.js" ]]; then
+    shasum -a 256 "$DIST_DIR/secure-asset-cache.js"
+  fi
 } | shasum -a 256 | awk '{print $1}')"
 perl -pi -e \
   "s/__TOONTOWN_RUNTIME_VERSION__/$RUNTIME_VERSION/g" \

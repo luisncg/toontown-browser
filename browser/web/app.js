@@ -755,24 +755,36 @@ async function prepareBrowserGameServer() {
     if (isLocalDevelopmentPage()) {
       return rememberBrowserGameServer(localBrowserGameServerForPage());
     }
-    const response = await fetch("/api/gateway/lease", {
-      method: "POST",
-      cache: "no-store",
-      credentials: "same-origin",
-    });
+    const authority = window.ToontownRuntimeAuthority;
+    const response = authority
+      ? await authority.signedRequest("/api/gateway/lease", {})
+      : await fetch("/api/gateway/lease", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
     if (!response.ok) {
       throw new Error("The secure game connection could not be prepared");
     }
     const material = await response.json();
     if (
-      material?.version !== 1 ||
+      ![1, 2].includes(material?.version) ||
       typeof material.resume !== "string" ||
       !/^[A-Za-z0-9_-]{32,128}$/.test(material.resume) ||
       typeof material.lease !== "string" ||
       material.lease.length > 2_048 ||
       !/^v1(?:\.[A-Za-z0-9_-]+){3}$/.test(material.lease) ||
       !Number.isFinite(material.expiresAt) ||
-      material.expiresAt <= Date.now()
+      material.expiresAt <= Date.now() ||
+      (
+        material.version === 2 &&
+        (
+          typeof material.authority !== "string" ||
+          !/^[a-f0-9]{32}$/.test(material.authority)
+        )
+      )
     ) {
       throw new Error("The secure game connection response was invalid");
     }
@@ -783,6 +795,9 @@ async function prepareBrowserGameServer() {
     );
     url.searchParams.set("resume", material.resume);
     url.searchParams.set("lease", material.lease);
+    if (material.authority) {
+      url.searchParams.set("authority", material.authority);
+    }
     return rememberBrowserGameServer(url.href);
   })().catch((error) => {
     browserGameServerPromise = undefined;
@@ -2774,7 +2789,25 @@ function loadGameRuntime() {
   return gameRuntimePromise;
 }
 
-async function launchGameRuntime() {
+async function launchGameRuntime(runtimeChallenge) {
+  const authority = window.ToontownRuntimeAuthority;
+  if (runtimeChallenge) authority?.primeChallenge(runtimeChallenge);
+  const authorityPromise = authority?.prepare() ?? Promise.resolve();
+  authorityPromise.then((material) => {
+    if (material?.local) return undefined;
+    return authority?.prefetchWorld([2_000, 20_000, 22_000]).catch((error) => {
+      console.warn(
+        "[Toontown authority] World capability prefetch remains optional",
+        error,
+      );
+    });
+  }).catch(() => {
+    // The required boot Promise below owns the actionable authority failure.
+  });
+  // Panda reads the game-server URL during synchronous runtime startup.
+  // Finish the signed lease handoff before executing the WASM bootstrap or it
+  // can permanently capture the local 127.0.0.1 fallback for this page.
+  await authorityPromise;
   await prepareBrowserGameServer();
   return loadGameRuntime();
 }
@@ -2804,6 +2837,16 @@ async function startVerifiedRuntime() {
     });
     if (!configResponse.ok) throw new Error("Bootstrap configuration failed");
     const config = await configResponse.json();
+    window.ToontownRuntimeAuthority?.configure({
+      required: config.authorityRequired === true,
+      release: config.release,
+    });
+    if (
+      config.authorityRequired === true &&
+      config.release !== runtimeAssetVersion
+    ) {
+      throw new Error("The browser client release is no longer current");
+    }
     if (!config.required) {
       await launchGameRuntime();
       return;
@@ -2817,7 +2860,7 @@ async function startVerifiedRuntime() {
       ? await sessionResponse.json()
       : { valid: false };
     if (session.valid === true) {
-      await launchGameRuntime();
+      await launchGameRuntime(session.runtime);
       return;
     }
 
@@ -2852,6 +2895,10 @@ async function startVerifiedRuntime() {
             body: JSON.stringify({ token }),
           });
           if (!response.ok) throw new Error("Verification failed");
+          const verification = await response.json();
+          window.ToontownRuntimeAuthority?.primeChallenge(
+            verification.runtime,
+          );
           if (retryTimer) clearTimeout(retryTimer);
         } catch {
           retryTurnstile("Verification needs another try");

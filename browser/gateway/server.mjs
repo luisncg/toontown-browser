@@ -30,6 +30,7 @@ const DEFAULT_BROWSER_SUSPEND_GRACE_MS = 15 * 60_000;
 const DEFAULT_BROWSER_RESUME_GRACE_MS = 5 * 60_000;
 const DEFAULT_ASTRON_HEARTBEAT_INTERVAL_MS = 10_000;
 const RESUME_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const AUTHORITY_KEY_PATTERN = /^[a-f0-9]{32}$/;
 const VISIBILITY_HIDDEN = "toontown:visibility:hidden";
 const VISIBILITY_VISIBLE = "toontown:visibility:visible";
 const CLIENT_HELLO = 1;
@@ -44,6 +45,33 @@ function rejectUpgrade(socket, status, message) {
     "Content-Type: text/plain; charset=utf-8\r\n" +
     `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
   );
+}
+
+function rejectGatewayUpgrade(
+  request,
+  socket,
+  status,
+  message,
+  reason,
+) {
+  let parameterNames = [];
+  try {
+    parameterNames = [
+      ...new URL(request.url ?? "", "http://gateway.invalid").searchParams.keys(),
+    ].sort();
+  } catch {
+    // The rejection reason already records an invalid route.
+  }
+  console.warn(`[GatewayReject] ${JSON.stringify({
+    reason,
+    status,
+    origin: String(request.headers.origin ?? "").slice(0, 256),
+    parameters: parameterNames,
+    bootstrapCookie: String(request.headers.cookie ?? "").includes(
+      "__Host-toontown_bootstrap=",
+    ),
+  })}`);
+  rejectUpgrade(socket, status, message);
 }
 
 function normalizeForwardedAddress(value) {
@@ -205,31 +233,72 @@ export function createGateway({
     try {
       requestUrl = new URL(request.url ?? "", "http://gateway.invalid");
     } catch {
-      rejectUpgrade(socket, "400 Bad Request", "Invalid WebSocket route");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "400 Bad Request",
+        "Invalid WebSocket route",
+        "invalid_route",
+      );
       return;
     }
     if (requestUrl.pathname !== "/astron") {
-      rejectUpgrade(socket, "404 Not Found", "Unknown WebSocket route");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "404 Not Found",
+        "Unknown WebSocket route",
+        "unknown_route",
+      );
       return;
     }
 
     const resumeToken = requestUrl.searchParams.get("resume") ?? "";
+    const authorityKey = requestUrl.searchParams.get("authority") ?? "";
     const reconnect = requestUrl.searchParams.get("reconnect") === "1";
     if (!RESUME_TOKEN_PATTERN.test(resumeToken)) {
-      rejectUpgrade(socket, "400 Bad Request", "A valid resume token is required");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "400 Bad Request",
+        "A valid resume token is required",
+        "invalid_resume",
+      );
+      return;
+    }
+    if (requireGatewayLease && !AUTHORITY_KEY_PATTERN.test(authorityKey)) {
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "400 Bad Request",
+        "A valid runtime authority is required",
+        "invalid_authority",
+      );
       return;
     }
 
     const origin = request.headers.origin;
     if (!origin || !originSet.has(origin)) {
-      rejectUpgrade(socket, "403 Forbidden", "Origin is not allowed");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "403 Forbidden",
+        "Origin is not allowed",
+        "origin_not_allowed",
+      );
       return;
     }
     if (
       requireBootstrapSession &&
       !verifyBootstrapSession(request.headers, bootstrapSessionSecret)
     ) {
-      rejectUpgrade(socket, "401 Unauthorized", "Browser verification is required");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "401 Unauthorized",
+        "Browser verification is required",
+        "invalid_bootstrap",
+      );
       return;
     }
 
@@ -253,28 +322,57 @@ export function createGateway({
       : "";
     const userAgent = String(request.headers["user-agent"] ?? "").slice(0, 1_024);
     const reconnectIdentity = requireBootstrapSession
-      ? gatewayReconnectIdentity({ sessionKey, userAgent, origin })
+      ? gatewayReconnectIdentity({
+        sessionKey,
+        userAgent,
+        origin,
+        authorityKey,
+      })
       : null;
     if (requireBootstrapSession && !reconnectIdentity) {
-      rejectUpgrade(socket, "401 Unauthorized", "Browser identity is required");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "401 Unauthorized",
+        "Browser identity is required",
+        "invalid_identity",
+      );
       return;
     }
 
     const retainedSession = resumableSessions.get(resumeToken);
     if (reconnect) {
       if (!retainedSession || !retainedSession.canResume()) {
-        rejectUpgrade(socket, "409 Conflict", "Browser session cannot be resumed");
+        rejectGatewayUpgrade(
+          request,
+          socket,
+          "409 Conflict",
+          "Browser session cannot be resumed",
+          "resume_unavailable",
+        );
         return;
       }
       if (
         requireBootstrapSession &&
         !retainedSession.matchesReconnect(reconnectIdentity)
       ) {
-        rejectUpgrade(socket, "403 Forbidden", "Browser session does not match");
+        rejectGatewayUpgrade(
+          request,
+          socket,
+          "403 Forbidden",
+          "Browser session does not match",
+          "resume_identity_mismatch",
+        );
         return;
       }
     } else if (retainedSession) {
-      rejectUpgrade(socket, "409 Conflict", "Resume token is already active");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "409 Conflict",
+        "Resume token is already active",
+        "resume_already_active",
+      );
       return;
     } else if (
       requireGatewayLease &&
@@ -287,10 +385,17 @@ export function createGateway({
           clientAddress: ip,
           userAgent,
           origin,
+          authorityKey,
         },
       )
     ) {
-      rejectUpgrade(socket, "401 Unauthorized", "Gateway lease is required");
+      rejectGatewayUpgrade(
+        request,
+        socket,
+        "401 Unauthorized",
+        "Gateway lease is required",
+        "invalid_lease",
+      );
       return;
     }
 
@@ -669,7 +774,8 @@ export function createGateway({
           : candidate !== null &&
             candidate.sessionKey === reconnectIdentity.sessionKey &&
             candidate.userAgentDigest === reconnectIdentity.userAgentDigest &&
-            candidate.origin === reconnectIdentity.origin
+            candidate.origin === reconnectIdentity.origin &&
+            candidate.authorityKey === reconnectIdentity.authorityKey
       ),
       close: () => finalize(1001, "Gateway is shutting down", "shutdown"),
     };

@@ -22,6 +22,7 @@ def load_gateway_function():
         "BROWSER_GAME_SERVER_STORAGE_KEY",
         "_BROWSER_RESUME_TOKEN_RE",
         "_BROWSER_GATEWAY_LEASE_RE",
+        "_BROWSER_AUTHORITY_RE",
     }
     for node in tree.body:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -54,7 +55,8 @@ class BrowserGatewayHandoffTests(unittest.TestCase):
         self.production = (
             "wss://toontown.lui.ss/astron?"
             "resume=abcdefghijklmnopqrstuvwxyzABCDEF&"
-            "lease=v1.AAAAAAAAAAAAAAAA.ciphertext.auth_tag"
+            "lease=v1.AAAAAAAAAAAAAAAA.ciphertext.auth_tag&"
+            "authority=0123456789abcdef0123456789abcdef"
         )
 
     def test_runtime_handoff_does_not_need_local_storage(self):
@@ -76,6 +78,21 @@ class BrowserGatewayHandoffTests(unittest.TestCase):
     def test_invalid_runtime_value_falls_back_safely(self):
         storage = types.SimpleNamespace(
             get_runtime_game_server=lambda: "ws://127.0.0.1:7198",
+            get_item=lambda _key: None,
+        )
+        with patch.dict(sys.modules, {"browser_storage": storage}):
+            self.assertEqual(
+                self.get_gateway(),
+                "ws://127.0.0.1:7200/astron",
+            )
+
+    def test_invalid_runtime_authority_falls_back_safely(self):
+        invalid = self.production.replace(
+            "0123456789abcdef0123456789abcdef",
+            "not-a-valid-authority",
+        )
+        storage = types.SimpleNamespace(
+            get_runtime_game_server=lambda: invalid,
             get_item=lambda _key: None,
         )
         with patch.dict(sys.modules, {"browser_storage": storage}):

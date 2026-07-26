@@ -29,6 +29,7 @@ BROWSER_GAME_SERVER_STORAGE_KEY = "open-toontown.game-server"
 _BROWSER_RESUME_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{32,128}$')
 _BROWSER_GATEWAY_LEASE_RE = re.compile(
     r'^v1(?:\.[A-Za-z0-9_-]+){3}$')
+_BROWSER_AUTHORITY_RE = re.compile(r'^[a-f0-9]{32}$')
 
 
 def _get_browser_game_server():
@@ -66,6 +67,7 @@ def _get_browser_game_server():
         return DEFAULT_BROWSER_GAME_SERVER
     resume_values = query.get('resume', ())
     lease_values = query.get('lease', ())
+    authority_values = query.get('authority', ())
     query_names = set(query)
     if (
         parsed.scheme not in ('ws', 'wss')
@@ -73,7 +75,11 @@ def _get_browser_game_server():
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path != '/astron'
-        or query_names not in ({'resume'}, {'resume', 'lease'})
+        or query_names not in (
+            {'resume'},
+            {'resume', 'lease'},
+            {'resume', 'lease', 'authority'},
+        )
         or len(resume_values) != 1
         or not _BROWSER_RESUME_TOKEN_RE.fullmatch(resume_values[0])
         or (
@@ -81,6 +87,13 @@ def _get_browser_game_server():
                 len(lease_values) != 1
                 or len(lease_values[0]) > 2048
                 or not _BROWSER_GATEWAY_LEASE_RE.fullmatch(lease_values[0])
+            )
+        )
+        or (
+            'authority' in query_names and (
+                len(authority_values) != 1
+                or not _BROWSER_AUTHORITY_RE.fullmatch(
+                    authority_values[0])
             )
         )
         or parsed.fragment

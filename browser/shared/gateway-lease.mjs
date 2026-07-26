@@ -45,6 +45,7 @@ function requireContext({
   clientAddress,
   userAgent,
   origin,
+  authorityKey,
 }) {
   if (typeof sessionKey !== "string" || !SESSION_PATTERN.test(sessionKey)) {
     throw new Error("A valid bootstrap session key is required");
@@ -80,12 +81,19 @@ function requireContext({
   )) {
     throw new Error("A valid gateway origin is required");
   }
+  if (
+    typeof authorityKey !== "string" ||
+    !SESSION_PATTERN.test(authorityKey)
+  ) {
+    throw new Error("A valid runtime authority key is required");
+  }
   return {
     s: sessionKey,
     r: resumeToken,
     ip: digest(clientAddress),
     ua: digest(userAgent),
     o: origin,
+    a: authorityKey,
   };
 }
 
@@ -100,6 +108,7 @@ export function createGatewayLease({
   clientAddress,
   userAgent,
   origin,
+  authorityKey,
   now = Date.now(),
   ttlSeconds = DEFAULT_GATEWAY_LEASE_TTL_SECONDS,
 }) {
@@ -125,6 +134,7 @@ export function createGatewayLease({
       clientAddress,
       userAgent,
       origin,
+      authorityKey,
     }),
   };
   const iv = randomBytes(12);
@@ -203,7 +213,8 @@ export function verifyGatewayLease(
       payload.r === expected.r &&
       payload.ip === expected.ip &&
       payload.ua === expected.ua &&
-      payload.o === expected.o
+      payload.o === expected.o &&
+      payload.a === expected.a
     );
   } catch {
     return false;
@@ -214,6 +225,7 @@ export function gatewayReconnectIdentity({
   sessionKey,
   userAgent,
   origin,
+  authorityKey,
 }) {
   if (typeof sessionKey !== "string" || !SESSION_PATTERN.test(sessionKey)) {
     return null;
@@ -230,9 +242,16 @@ export function gatewayReconnectIdentity({
   } catch {
     return null;
   }
+  if (
+    typeof authorityKey !== "string" ||
+    !SESSION_PATTERN.test(authorityKey)
+  ) {
+    return null;
+  }
   return Object.freeze({
     sessionKey,
     userAgentDigest: digest(userAgent),
     origin,
+    authorityKey,
   });
 }

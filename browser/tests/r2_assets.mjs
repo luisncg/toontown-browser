@@ -82,7 +82,9 @@ assert.deepEqual(commands[0], {
     Bucket: "private-assets",
     Key: `releases/${release}/open-toontown.wasm.gz`,
     ResponseContentDisposition:
-      `inline; filename="open-toontown.wasm"; toontown-session="${"1".repeat(32)}"`,
+      `inline; filename="open-toontown.wasm"; ` +
+      `toontown-session="${"1".repeat(32)}"; ` +
+      `toontown-authority="local"`,
   },
   expiresIn: 60,
 });
@@ -97,7 +99,9 @@ assert.equal(
 );
 assert.equal(
   commands[1].input.ResponseContentDisposition,
-  `inline; filename="open-toontown.wasm"; toontown-session="${"2".repeat(32)}"`,
+  `inline; filename="open-toontown.wasm"; ` +
+  `toontown-session="${"2".repeat(32)}"; ` +
+  `toontown-authority="local"`,
 );
 assert.equal(signed, 2, "separate sessions must receive separate signed URLs");
 assert.equal(
@@ -123,6 +127,7 @@ const gatewayUrl = await gatewayStore.redirect(
   "GET",
   "gzip, br",
   "3".repeat(32),
+  "5".repeat(32),
 );
 const parsedGatewayUrl = new URL(gatewayUrl);
 assert.equal(parsedGatewayUrl.origin, "https://toontown.lui.ss");
@@ -137,6 +142,7 @@ assert.deepEqual(
   {
     method: gatewayTicket.method,
     session: gatewayTicket.session,
+    authority: gatewayTicket.authority,
     objectKey: gatewayTicket.objectKey,
     name: gatewayTicket.name,
     contentType: gatewayTicket.contentType,
@@ -145,6 +151,7 @@ assert.deepEqual(
   {
     method: "GET",
     session: "3".repeat(32),
+    authority: "5".repeat(32),
     objectKey: `releases/${release}/open-toontown.wasm.gz`,
     name: "open-toontown.wasm",
     contentType: "application/wasm",
@@ -153,14 +160,22 @@ assert.deepEqual(
 );
 assert.equal(
   await gatewayStore.redirect(
-    "/open-toontown.wasm", "GET", "gzip", "3".repeat(32),
+    "/open-toontown.wasm",
+    "GET",
+    "gzip",
+    "3".repeat(32),
+    "5".repeat(32),
   ),
   gatewayUrl,
   "the same session may briefly reuse its opaque ticket",
 );
 assert.notEqual(
   await gatewayStore.redirect(
-    "/open-toontown.wasm", "GET", "gzip", "4".repeat(32),
+    "/open-toontown.wasm",
+    "GET",
+    "gzip",
+    "4".repeat(32),
+    "5".repeat(32),
   ),
   gatewayUrl,
   "separate sessions must receive separate opaque tickets",

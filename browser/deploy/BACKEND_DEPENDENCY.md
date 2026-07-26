@@ -7,22 +7,53 @@ browser-delivered bytes cannot be copied.
 ## New game connection
 
 1. Cloudflare proxies the browser to the dedicated origin.
-2. The verified browser sends a same-origin `POST /api/gateway/lease`.
-3. The origin generates the resume token; the browser does not choose it.
-4. The origin encrypts an authenticated five-minute lease containing:
+2. During normal bootstrap, the page generates a non-extractable ECDSA P-256
+   proof-of-possession key.
+3. The origin returns an encrypted challenge bound to the bootstrap session,
+   current immutable runtime/R2 release, browser identity, address, and exact
+   public origin.
+4. The browser signs that challenge. The origin verifies it and returns a
+   short-lived encrypted runtime authorization containing the public-key
+   thumbprint and the same release/context bindings.
+5. The verified browser signs a same-origin
+   `POST /api/gateway/lease`. The signature covers the exact method, path, body,
+   timestamp, one-use nonce, and runtime-authorization id.
+6. The origin generates the resume token; the browser does not choose it.
+7. The origin encrypts an authenticated five-minute lease containing:
    - bootstrap-session digest;
+   - runtime-authorization digest;
    - resume token;
    - client-address digest;
    - User-Agent digest;
    - exact public origin;
    - issued/expiry times and a random nonce.
-5. The browser passes the opaque lease and resume token to `/astron`.
-6. The loopback gateway independently validates every field before opening a
+8. The browser passes the opaque lease, authority digest, and resume token to
+   `/astron`.
+9. The loopback gateway independently validates every field before opening a
    loopback TCP connection to Astron.
 
 Changing the token, browser, address, origin, session, ciphertext, tag, or
-expiry rejects the socket. The signing key exists only in
+expiry rejects the socket. Copying an old client also fails when its embedded
+runtime release no longer matches the server's current release. Server signing
+keys exist only in
 `/etc/toontown-browser/environment`.
+
+The authority registration runs in parallel with runtime/cache preparation.
+It is completed during boot and reused by Pick-a-Toon, so it does not add a
+serial Toon-selection round trip.
+
+## World-transition capability foundation
+
+The verified runtime prefetches short-lived, encrypted capabilities for likely
+initial zones while login/Pick-a-Toon is on screen. Each capability is bound to
+the runtime authorization, current release, zone id, required phase metadata,
+and a content epoch. The first deployment is observe/prefetch only; gameplay
+enforcement is enabled only after transition p50/p95 telemetry proves there is
+no regression.
+
+Custom systems are migrated behind this authority one at a time. Rendering,
+animation, audio, and input stay local; custom eligibility, state transitions,
+and rewards move server-side.
 
 ## Mobile reconnect
 
@@ -32,7 +63,7 @@ window remains:
 
 - the initial connection must have passed a valid gateway lease;
 - reconnect requires the same resume token, bootstrap session, browser
-  identity, and origin;
+  identity, runtime authority, and origin;
 - no new Astron TCP connection is opened;
 - the lease may have expired because it authorized the retained session, not a
   second new session;
@@ -55,6 +86,7 @@ that a direct `--resolve` request still receives `403`.
 ```bash
 npm run test:bootstrap-session
 npm run test:bootstrap-production
+npm run test:runtime-authority
 npm run test:gateway-lease
 npm run test:gateway-bootstrap
 npm run test:gateway
@@ -65,7 +97,10 @@ Production acceptance also checks:
 
 - `/api/gateway/lease` is `401` without a bootstrap session;
 - a verified connection without `lease` is `401`;
-- the real runtime URL contains only `resume` and `lease`;
+- a bootstrap cookie without a valid PoP request cannot mint asset tickets or a
+  gateway lease;
+- replayed request nonces are rejected;
+- the real runtime URL contains only `resume`, `lease`, and `authority`;
 - direct origin HTTPS is `403`;
 - all internal ports `7197`-`7200` and `8180` remain loopback-only.
 

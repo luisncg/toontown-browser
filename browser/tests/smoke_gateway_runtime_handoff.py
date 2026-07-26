@@ -105,9 +105,16 @@ expected_gateway = (
          f"{game_origin.netloc}"
 )
 assert result["runtime_gateway_origin"] == f"{expected_gateway}/astron"
-assert result["runtime_gateway_parameters"] in (["resume"], ["lease", "resume"])
+assert result["runtime_gateway_parameters"] in (
+    ["resume"],
+    ["authority", "lease", "resume"],
+)
 if game_origin.hostname not in {"127.0.0.1", "localhost", "::1"}:
-    assert result["runtime_gateway_parameters"] == ["lease", "resume"]
+    assert result["runtime_gateway_parameters"] == [
+        "authority",
+        "lease",
+        "resume",
+    ]
 assert result["connect_lines"]
 if result["gateway_active_connections"] is not None:
     assert result["gateway_active_connections"] >= 1

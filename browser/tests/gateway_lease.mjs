@@ -15,6 +15,7 @@ const context = {
   clientAddress: "198.51.100.25",
   userAgent: "Toontown Browser lease test/1.0",
   origin: "https://toontown.lui.ss",
+  authorityKey: "b".repeat(32),
 };
 const lease = createGatewayLease({
   secret,
@@ -59,6 +60,15 @@ assert.equal(
     lease,
     secret,
     { ...context, origin: "https://copied.example" },
+    now,
+  ),
+  false,
+);
+assert.equal(
+  verifyGatewayLease(
+    lease,
+    secret,
+    { ...context, authorityKey: "c".repeat(32) },
     now,
   ),
   false,

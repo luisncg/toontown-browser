@@ -148,7 +148,13 @@ export class R2AssetStore {
     return "direct-r2";
   }
 
-  async redirect(pathname, method, acceptEncodingHeader, sessionKey) {
+  async redirect(
+    pathname,
+    method,
+    acceptEncodingHeader,
+    sessionKey,
+    authorityKey = "",
+  ) {
     let decoded;
     try {
       decoded = decodeURIComponent(pathname);
@@ -163,12 +169,16 @@ export class R2AssetStore {
     if (typeof sessionKey !== "string" || !/^[a-f0-9]{16,64}$/.test(sessionKey)) {
       throw new Error("A private asset session key is required");
     }
+    if (authorityKey && !/^[a-f0-9]{32}$/.test(authorityKey)) {
+      throw new Error("A valid runtime asset authority is required");
+    }
 
     const useGzip = Boolean(
       entry.gzip && acceptsEncoding(acceptEncodingHeader, "gzip"),
     );
     const representation = useGzip ? entry.gzip : entry.identity;
-    const cacheKey = `${sessionKey}:${method}:${representation.objectKey}`;
+    const cacheKey =
+      `${sessionKey}:${authorityKey}:${method}:${representation.objectKey}`;
     const now = Date.now();
     const cached = this.signedUrls.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.url;
@@ -183,7 +193,8 @@ export class R2AssetStore {
       // bearer URL unique to the verified bootstrap session that requested it.
       // The object bytes are unchanged and Emscripten ignores this header.
       commandInput.ResponseContentDisposition =
-        `inline; filename="${name}"; toontown-session="${sessionKey}"`;
+        `inline; filename="${name}"; toontown-session="${sessionKey}"; ` +
+        `toontown-authority="${authorityKey || "local"}"`;
     }
     const command = new Command(commandInput);
     const url = await this.sign(command, { expiresIn: this.ttlSeconds });
@@ -236,7 +247,13 @@ export class WorkerAssetGatewayStore {
     return "worker-gateway";
   }
 
-  async redirect(pathname, method, acceptEncodingHeader, sessionKey) {
+  async redirect(
+    pathname,
+    method,
+    acceptEncodingHeader,
+    sessionKey,
+    authorityKey,
+  ) {
     let decoded;
     try {
       decoded = decodeURIComponent(pathname);
@@ -250,13 +267,20 @@ export class WorkerAssetGatewayStore {
     if (typeof sessionKey !== "string" || !/^[a-f0-9]{32}$/.test(sessionKey)) {
       throw new Error("A private asset session key is required");
     }
+    if (
+      typeof authorityKey !== "string" ||
+      !/^[a-f0-9]{32}$/.test(authorityKey)
+    ) {
+      throw new Error("A valid runtime asset authority is required");
+    }
     if (!["GET", "HEAD"].includes(method)) return null;
 
     const useGzip = Boolean(
       entry.gzip && acceptsEncoding(acceptEncodingHeader, "gzip"),
     );
     const representation = useGzip ? entry.gzip : entry.identity;
-    const cacheKey = `${sessionKey}:${method}:${representation.objectKey}`;
+    const cacheKey =
+      `${sessionKey}:${authorityKey}:${method}:${representation.objectKey}`;
     const now = Date.now();
     const cached = this.tickets.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.url;
@@ -264,10 +288,11 @@ export class WorkerAssetGatewayStore {
     const expiresAtSeconds = Math.floor(now / 1_000) + this.ttlSeconds;
     const ticket = await sealAssetTicket(
       {
-        version: 1,
+        version: 2,
         expiresAt: expiresAtSeconds,
         method,
         session: sessionKey,
+        authority: authorityKey,
         objectKey: representation.objectKey,
         name,
         contentType: entry.contentType,

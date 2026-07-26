@@ -13,6 +13,7 @@ const session = createHash("sha256")
   .digest("hex")
   .slice(0, 32);
 const release = "a".repeat(64);
+const authority = "c".repeat(32);
 const now = Math.floor(Date.now() / 1_000);
 const calls = [];
 
@@ -45,22 +46,35 @@ const environment = {
   },
 };
 
-function request(token, { method = "GET", cookie = bootstrapCookie } = {}) {
+function request(
+  token,
+  {
+    method = "GET",
+    cookie = bootstrapCookie,
+    authorityHeader = authority,
+  } = {},
+) {
   return new Request(`${origin}/assets/${token}`, {
     method,
-    headers: cookie
-      ? { Cookie: `__Host-toontown_bootstrap=${cookie}` }
-      : {},
+    headers: {
+      ...(cookie
+        ? { Cookie: `__Host-toontown_bootstrap=${cookie}` }
+        : {}),
+      ...(authorityHeader
+        ? { "X-Toontown-Asset-Authority": authorityHeader }
+        : {}),
+    },
   });
 }
 
 async function ticket(overrides = {}) {
   return sealAssetTicket(
     {
-      version: 1,
+      version: 2,
       expiresAt: now + 180,
       method: "GET",
       session,
+      authority,
       objectKey: `releases/${release}/open-toontown.data.gz`,
       name: "open-toontown.data",
       contentType: "application/octet-stream",
@@ -84,6 +98,15 @@ assert.deepEqual(calls.at(-1), [
 ]);
 
 assert.equal((await worker.fetch(request(validToken, { cookie: "" }), environment)).status, 401);
+assert.equal(
+  (
+    await worker.fetch(
+      request(validToken, { authorityHeader: "d".repeat(32) }),
+      environment,
+    )
+  ).status,
+  403,
+);
 assert.equal((await worker.fetch(request(await ticket({ session: "0".repeat(32) })), environment)).status, 403);
 assert.equal((await worker.fetch(request(await ticket({ expiresAt: now - 1 })), environment)).status, 403);
 assert.equal((await worker.fetch(request(await ticket({ objectKey: "private/secret" })), environment)).status, 403);

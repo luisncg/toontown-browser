@@ -107,6 +107,9 @@ with sync_playwright() as playwright:
             )
             raise
         page.evaluate("window.ToontownSecureAssetCache.waitForIdle()")
+        # Let Playwright deliver any response events whose bodies completed
+        # during the final direct-handoff/cache write before taking counts.
+        page.wait_for_timeout(250)
         diagnostics = page.evaluate("window.ToontownSecureAssetCache.diagnostics()")
         return (
             page,
@@ -144,7 +147,10 @@ with sync_playwright() as playwright:
     )
     assert cold_cache["writes"] >= 2
     assert cold_cache["disabled"] is False
-    cold_gateway_before_mount = len(cold_gateway)
+    cold_phase_4_before = cold_page.evaluate(
+        "window.ToontownAssetLoader.diagnostics()['4']"
+    )
+    assert cold_phase_4_before["state"] in {"loading", "ready"}
     cold_mount_ms = cold_page.evaluate(
         """async () => {
             const startedAt = performance.now();
@@ -152,14 +158,18 @@ with sync_playwright() as playwright:
             return performance.now() - startedAt;
         }"""
     )
+    cold_page.wait_for_timeout(100)
     cold_phase_4 = cold_page.evaluate(
         "window.ToontownAssetLoader.diagnostics()['4']"
     )
     assert cold_phase_4["state"] == "ready"
-    assert cold_phase_4["fromCache"] is True
-    assert len(cold_gateway) == cold_gateway_before_mount, (
-        "mounting prefetched Phase 4 unexpectedly used the Worker gateway"
-    )
+    assert cold_phase_4["fromCache"] is False
+    cold_handoff = cold_phase_4["directHandoff"]
+    assert cold_handoff["networkParts"] == 23
+    assert cold_handoff["cacheParts"] == 0
+    assert cold_handoff["claims"] == 23
+    assert 1 <= cold_handoff["peakActiveParts"] <= 4
+    assert cold_handoff["cacheFailures"] == 0
     cold_ticket_diagnostics = cold_page.evaluate(
         "window.ToontownAssetTicketPool.diagnostics()"
     )
@@ -167,9 +177,9 @@ with sync_playwright() as playwright:
         "window.__toontownBootDiagnostics"
     )
     assert cold_ticket_diagnostics["batches"] == 1
-    assert cold_ticket_diagnostics["requested"] == 25
-    assert cold_ticket_diagnostics["issued"] == 25
-    assert cold_ticket_diagnostics["uses"] == 25
+    assert cold_ticket_diagnostics["requested"] == 26
+    assert cold_ticket_diagnostics["issued"] == 26
+    assert cold_ticket_diagnostics["uses"] == 26
     assert (
         cold_boot_diagnostics["phase4StartedAt"]
         <= cold_boot_diagnostics["runtimeStartedAt"]
@@ -211,7 +221,7 @@ with sync_playwright() as playwright:
         f"one batch + {len(cold_gateway)} direct opaque Worker streams, "
         f"{warm_cache['hits']} encrypted-cache hits, "
         "engine/WASM started before Phase 4 completed, "
-        f"Phase 4 mounted from cache in {cold_mount_ms:.0f}ms cold / "
-        f"{warm_mount_ms:.0f}ms warm, no direct R2 URLs"
+        f"Phase 4 reused direct handoff in {cold_mount_ms:.0f}ms cold / "
+        f"encrypted cache in {warm_mount_ms:.0f}ms warm, no direct R2 URLs"
     )
     browser.close()

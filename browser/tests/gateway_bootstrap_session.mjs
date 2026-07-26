@@ -36,8 +36,10 @@ const gateway = createGateway({
 });
 await once(gateway, "listening");
 const resumeToken = createGatewayResumeToken();
+const authorityKey = "d".repeat(32);
 const url =
-  `ws://127.0.0.1:${gateway.address().port}/astron?resume=${resumeToken}`;
+  `ws://127.0.0.1:${gateway.address().port}/astron?resume=${resumeToken}` +
+  `&authority=${authorityKey}`;
 
 const rejected = new WebSocket(url, {
   origin,
@@ -56,6 +58,7 @@ const lease = createGatewayLease({
   clientAddress: "127.0.0.1",
   userAgent,
   origin,
+  authorityKey,
 });
 
 const missingLease = new WebSocket(url, {
