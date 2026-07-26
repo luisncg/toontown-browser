@@ -118,6 +118,14 @@ class DistributedDoorAI(DistributedObjectAI.DistributedObjectAI):
         if lockedVal:
             self.sendReject(avatarID, lockedVal)
         else:
+            from toontown.authority.BrowserAuthorityManagerAI import (
+                consumeProtectedTransition)
+            if not consumeProtectedTransition(
+                    self.air,
+                    avatarID,
+                    'door.enter',
+                    {'door': self.doId, 'zone': self.zoneId}):
+                return
             self.enqueueAvatarIdEnter(avatarID)
             self.sendUpdateToAvatarId(avatarID, 'setOtherZoneIdAndDoId', [
              self.otherDoor.getZoneId(), self.otherDoor.getDoId()])

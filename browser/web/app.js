@@ -1583,6 +1583,19 @@ class ToontownPhaseAssetLoader {
     return phaseManifest;
   }
 
+  async prepareSecurePhaseData(phaseManifest) {
+    const secureCache = window.ToontownSecureAssetCache;
+    const ticketPool = window.ToontownAssetTicketPool;
+    if (!secureCache || !ticketPool) return;
+    const versioned = phaseManifest.parts.map(
+      (part) => versionedAssetUrl(part.data),
+    );
+    const missing = await secureCache.missingAssetNames(versioned);
+    if (missing.length) {
+      await ticketPool.prepare(missing);
+    }
+  }
+
   yieldToBrowser() {
     return new Promise((resolve) => {
       window.requestAnimationFrame(() => setTimeout(resolve, 0));
@@ -1904,6 +1917,7 @@ class ToontownPhaseAssetLoader {
     record.prefetchPromise = (async () => {
       const startedAt = performance.now();
       const phaseManifest = await this.getPhaseManifest(normalized);
+      await this.prepareSecurePhaseData(phaseManifest);
       const assetBytes = phaseManifest.parts.reduce(
         (total, part) => total + Number(part.bytes ?? 0),
         0,
@@ -1990,6 +2004,7 @@ class ToontownPhaseAssetLoader {
     record.startedAt = performance.now();
     record.promise = (async () => {
       const phaseManifest = await this.getPhaseManifest(normalized);
+      await this.prepareSecurePhaseData(phaseManifest);
       window.ToontownPerformanceTelemetry.recordPhaseStart({
         phase: normalized,
         parts: phaseManifest.parts.length,

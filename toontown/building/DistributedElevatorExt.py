@@ -119,7 +119,12 @@ class DistributedElevatorExt(DistributedElevator.DistributedElevator):
         acceptMega = value == DGG.DIALOG_OK
         self.megaVoteSubmitted = True
         self._cleanupDialog('megaVoteDialog')
-        self.sendUpdate('requestMegaVote', [int(acceptMega)])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        choice = int(acceptMega)
+        requestTransition(
+            'mega.vote',
+            {'elevator': self.doId, 'accept': choice},
+            lambda: self.sendUpdate('requestMegaVote', [choice]))
 
     def showMegaJoinPrompt(self, megaFloors):
         self._cleanupDialog('megaJoinDialog')
@@ -136,7 +141,12 @@ class DistributedElevatorExt(DistributedElevator.DistributedElevator):
     def _handleMegaJoin(self, value):
         acceptMega = value == DGG.DIALOG_OK
         self._cleanupDialog('megaJoinDialog')
-        self.sendUpdate('requestMegaJoin', [int(acceptMega)])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        choice = int(acceptMega)
+        requestTransition(
+            'mega.join',
+            {'elevator': self.doId, 'accept': choice},
+            lambda: self.sendUpdate('requestMegaJoin', [choice]))
 
     def _showMegaNotice(self, message, state):
         if self.megaNoticeState == state:

@@ -63,6 +63,15 @@ class EstateManagerAI(DistributedObjectAI):
             self.sendUpdateToAvatarId(avId, 'setEstateZone', [0, 0])
             return
 
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition)
+        if not consumeProtectedTransition(
+                self.air,
+                avId,
+                'estate.enter',
+                {'manager': self.doId, 'owner': ownerId}):
+            return
+
         self.pendingEstateRequests.setdefault(ownerId, []).append(avId)
         if ownerId in self.ownerToZone:
             self._finishEstateRequests(ownerId)

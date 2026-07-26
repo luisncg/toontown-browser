@@ -110,7 +110,11 @@ class DistributedPondBingoManager(DistributedObject.DistributedObject, FSM.FSM):
          species])
 
     def d_bingoCall(self):
-        self.sendUpdate('handleBingoCall', [self.cardId])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        requestTransition(
+            'fish-bingo.claim',
+            {'manager': self.doId, 'card': self.cardId},
+            lambda: self.sendUpdate('handleBingoCall', [self.cardId]))
 
     def setCardState(self, cardId, typeId, tileSeed, gameState):
         self.cardId = cardId

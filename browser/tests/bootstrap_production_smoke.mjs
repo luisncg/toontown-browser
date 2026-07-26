@@ -21,6 +21,11 @@ import {
   runtimeRegistrationMessage,
   runtimeRequestMessage,
 } from "../shared/runtime-authority.mjs";
+import {
+  verifyGameSessionState,
+  verifyGameTransitionCapability,
+  verifySignedFeatureModule,
+} from "../shared/game-authority.mjs";
 
 async function availablePort() {
   const probe = createServer();
@@ -447,9 +452,80 @@ try {
   assert.ok(!ticketBatch.tickets[0].url.includes("phase-4"));
   assert.ok(!ticketBatch.tickets[0].url.includes(release));
 
+  const gameSessionResponse = await authorityClient.request(
+    "/api/runtime/game-session",
+    {},
+  );
+  assert.equal(gameSessionResponse.status, 200);
+  const gameSession = await gameSessionResponse.json();
+  assert.equal(gameSession.version, 1);
+  assert.equal(gameSession.release, release);
+  assert.match(gameSession.stateToken, /^gs1(?:\.[A-Za-z0-9_-]+){2}$/);
+  assert.match(gameSession.marker, /^[A-Za-z0-9_-]{22}$/);
+  const verifiedGameState = verifyGameSessionState({
+    secret: runtimeAuthoritySecret,
+    stateToken: gameSession.stateToken,
+    release,
+  });
+  assert.equal(verifiedGameState.sq, 0);
+
+  const transitionResponse = await authorityClient.request(
+    "/api/runtime/game-transitions",
+    {
+      stateToken: gameSession.stateToken,
+      action: "estate.enter",
+      target: { manager: 1001, owner: 2002 },
+    },
+  );
+  assert.equal(transitionResponse.status, 200);
+  const transition = await transitionResponse.json();
+  assert.match(transition.capability, /^gt1(?:\.[A-Za-z0-9_-]+){2}$/);
+  assert.ok(verifyGameTransitionCapability({
+    secret: runtimeAuthoritySecret,
+    capability: transition.capability,
+    release,
+    action: "estate.enter",
+    target: { manager: 1001, owner: 2002 },
+  }));
+
+  const otherAuthorityClient = await createAuthorityClient(session);
+  assert.equal(
+    (await otherAuthorityClient.request(
+      "/api/runtime/game-transitions",
+      {
+        stateToken: gameSession.stateToken,
+        action: "estate.enter",
+        target: { manager: 1001, owner: 2002 },
+      },
+    )).status,
+    409,
+  );
+
+  const featureModuleResponse = await authorityClient.request(
+    "/api/runtime/feature-modules",
+    {
+      stateToken: gameSession.stateToken,
+      moduleIds: ["custom-features-v1"],
+    },
+  );
+  assert.equal(featureModuleResponse.status, 200);
+  const featureModules = await featureModuleResponse.json();
+  assert.equal(featureModules.modules.length, 1);
+  assert.equal(
+    featureModules.modules[0].marker,
+    gameSession.marker,
+  );
+  assert.ok(verifySignedFeatureModule({
+    secret: runtimeAuthoritySecret,
+    signature: featureModules.modules[0].signature,
+    moduleId: featureModules.modules[0].moduleId,
+    module: featureModules.modules[0].module,
+    release,
+  }));
+
   const worldCapabilityResponse = await authorityClient.request(
     "/api/runtime/world-capabilities",
-    { zoneIds: [2_000, 22_000] },
+    { zoneIds: [2_000, 22_000], stateToken: gameSession.stateToken },
   );
   assert.equal(worldCapabilityResponse.status, 200);
   const worldCapabilities = await worldCapabilityResponse.json();
@@ -461,7 +537,7 @@ try {
   );
   assert.deepEqual(
     worldCapabilities.capabilities[0].requiredPhases,
-    ["4"],
+    ["4", "5", "5.5"],
   );
   assert.deepEqual(
     worldCapabilities.capabilities[1].requiredPhases,
@@ -470,6 +546,12 @@ try {
   for (const capability of worldCapabilities.capabilities) {
     assert.match(capability.capability, /^rw1(?:\.[A-Za-z0-9_-]+){3}$/);
     assert.ok(capability.expiresAt > Date.now());
+    assert.equal(capability.forensicMarker, gameSession.marker);
+    assert.equal(
+      capability.composition.digest,
+      capability.compositionDigest,
+    );
+    assert.ok(capability.composition.presentationModules.length >= 1);
   }
 
   const rateSession = createBootstrapSession(secret, Date.now() + 1_000);

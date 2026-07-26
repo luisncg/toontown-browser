@@ -92,6 +92,14 @@ class DistributedElevatorExtAI(DistributedElevatorAI.DistributedElevatorAI):
             return
         if avId not in self.megaVoters or avId in self.megaVotes:
             return
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition)
+        if not consumeProtectedTransition(
+                self.air,
+                avId,
+                'mega.vote',
+                {'elevator': self.doId, 'accept': int(bool(acceptMega))}):
+            return
         if not acceptMega:
             self._beginRegularFallback()
             return
@@ -193,15 +201,26 @@ class DistributedElevatorExtAI(DistributedElevatorAI.DistributedElevatorAI):
         avId = self.air.getAvatarIdFromSender()
         if avId not in self.pendingMegaJoins:
             return
-        self.pendingMegaJoins.discard(avId)
-        if not acceptMega or self.megaState != MegaBuildingGlobals.MEGA_STATE_RECRUITING:
+        if self.megaState != MegaBuildingGlobals.MEGA_STATE_RECRUITING:
             return
-        av = self.air.doId2do.get(avId)
-        if (not av or self.findAvatar(avId) is not None or
-                self.countFullSeats() >= MegaBuildingGlobals.MEGA_MAX_TOONS or
-                self.checkBoard(av) != 0 or
-                not self._canRecruitMegaToon(avId)):
-            self.rejectBoarder(avId, REJECT_NOSEAT)
+        if acceptMega:
+            av = self.air.doId2do.get(avId)
+            if (not av or self.findAvatar(avId) is not None or
+                    self.countFullSeats() >= MegaBuildingGlobals.MEGA_MAX_TOONS or
+                    self.checkBoard(av) != 0 or
+                    not self._canRecruitMegaToon(avId)):
+                self.rejectBoarder(avId, REJECT_NOSEAT)
+                return
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition)
+        if not consumeProtectedTransition(
+                self.air,
+                avId,
+                'mega.join',
+                {'elevator': self.doId, 'accept': int(bool(acceptMega))}):
+            return
+        self.pendingMegaJoins.discard(avId)
+        if not acceptMega:
             return
         self.acceptingBoardersHandler(avId, 0, 0)
 

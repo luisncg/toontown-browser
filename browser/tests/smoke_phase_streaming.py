@@ -102,6 +102,10 @@ def open_game(
     page.on("pageerror", lambda error: page_errors.append(str(error)))
     page.goto(GAME_URL, wait_until="domcontentloaded", timeout=120_000)
     page.locator("#loading.is-done").wait_for(state="attached", timeout=60_000)
+    welcome = page.locator("#welcome-overlay")
+    if welcome.is_visible():
+        page.locator("#welcome-accept").click()
+        welcome.wait_for(state="hidden", timeout=5_000)
     return page
 
 

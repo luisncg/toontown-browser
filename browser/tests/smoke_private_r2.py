@@ -185,6 +185,31 @@ with sync_playwright() as playwright:
         <= cold_boot_diagnostics["runtimeStartedAt"]
         < cold_boot_diagnostics["phase4CompletedAt"]
     ), "the production runtime and Phase 4 downloads did not overlap"
+
+    deferred_gateway_before = len(cold_gateway)
+    deferred_origin_before = len(cold_origin_heavy)
+    deferred_ticket_batches_before = len(cold_ticket_batches)
+    deferred_phase_ms = cold_page.evaluate(
+        """async () => {
+            const startedAt = performance.now();
+            await window.ToontownAssetLoader.requestPhase('5');
+            await window.ToontownSecureAssetCache.waitForIdle();
+            return performance.now() - startedAt;
+        }"""
+    )
+    cold_page.wait_for_timeout(250)
+    deferred_gateway = cold_gateway[deferred_gateway_before:]
+    deferred_origin = cold_origin_heavy[deferred_origin_before:]
+    assert len(cold_ticket_batches) == deferred_ticket_batches_before + 1
+    assert cold_ticket_batches[-1] == 200
+    assert deferred_gateway, "deferred Phase 5 did not use opaque Worker tickets"
+    assert all(item["status"] == 200 for item in deferred_gateway)
+    assert not deferred_origin, (
+        "deferred Phase 5 attempted a direct origin heavy-asset request"
+    )
+    assert cold_page.evaluate(
+        "window.ToontownAssetLoader.diagnostics()['5'].state"
+    ) == "ready"
     cold_page.close()
 
     (
@@ -222,6 +247,8 @@ with sync_playwright() as playwright:
         f"{warm_cache['hits']} encrypted-cache hits, "
         "engine/WASM started before Phase 4 completed, "
         f"Phase 4 reused direct handoff in {cold_mount_ms:.0f}ms cold / "
-        f"encrypted cache in {warm_mount_ms:.0f}ms warm, no direct R2 URLs"
+        f"encrypted cache in {warm_mount_ms:.0f}ms warm, "
+        f"deferred Phase 5 used {len(deferred_gateway)} opaque streams in "
+        f"{deferred_phase_ms:.0f}ms, no direct R2 URLs"
     )
     browser.close()

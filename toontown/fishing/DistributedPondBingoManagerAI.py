@@ -153,6 +153,14 @@ class DistributedPondBingoManagerAI(DistributedObjectAI):
                 self.bingoCard.checkForBingo() != BingoGlobals.WIN):
             self._record(avId, 'invalid or duplicate Fish Bingo call')
             return
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition)
+        if not consumeProtectedTransition(
+                self.air,
+                avId,
+                'fish-bingo.claim',
+                {'manager': self.doId, 'card': cardId}):
+            return
         self.canCall = False
         self.resolvedCardId = self.cardId
         avatar = self.air.doId2do.get(avId)
@@ -180,8 +188,9 @@ class DistributedPondBingoManagerAI(DistributedObjectAI):
                 continue
             self.air.fishManager.creditJellybeans(
                 avatar, self.jackpot,
-                lambda success, target=participantId: self._rewardLogged(
-                    target, success))
+                lambda success, target=participantId, reward=self.jackpot,
+                card=self.cardId: self._rewardLogged(
+                    target, success, reward, card))
         self.air.writeServerEvent(
             'fishBingoWin', avId,
             'pond=%s card=%s type=%s winners=%s reward=%s' %
@@ -333,10 +342,21 @@ class DistributedPondBingoManagerAI(DistributedObjectAI):
         self.requestDelete()
         return task.done
 
-    def _rewardLogged(self, avId, success):
+    def _rewardLogged(self, avId, success, reward=0, cardId=0):
         if not success:
             self.notify.warning(
                 'Atomic Fish Bingo reward conflicted for avatar %s' % avId)
+            return
+        authority = getattr(self.air, 'browserAuthorityManager', None)
+        if authority is not None:
+            authority.recordProgressionMutation(
+                avId,
+                'fish-bingo.reward',
+                {
+                    'card': int(cardId),
+                    'jellybeans': int(reward),
+                    'pond': int(self.pondDoId),
+                })
 
     def _record(self, avId, message):
         self.air.writeServerEvent('suspicious', avId or 0, message)

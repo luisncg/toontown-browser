@@ -36,6 +36,10 @@ with sync_playwright() as playwright:
     page.goto(GAME_URL, wait_until="networkidle", timeout=120_000)
     page.locator("#loading.is-done").wait_for(state="attached", timeout=45_000)
     page.wait_for_timeout(750)
+    welcome = page.locator("#welcome-overlay")
+    if welcome.is_visible():
+        page.locator("#welcome-accept").click()
+        welcome.wait_for(state="hidden", timeout=5_000)
 
     canvas = page.locator("#canvas")
     before = canvas.screenshot()

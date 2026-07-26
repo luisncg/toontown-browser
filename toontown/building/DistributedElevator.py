@@ -345,9 +345,15 @@ class DistributedElevator(DistributedObject.DistributedObject):
             if self.elevatorTripId and localAvatar.lastElevatorLeft == self.elevatorTripId:
                 self.rejectBoard(base.localAvatar.doId, REJECT_SHUFFLE)
             elif base.localAvatar.hp > 0:
-                self.cr.playGame.getPlace().detectedElevatorCollision(self)
-                toon = base.localAvatar
-                self.sendUpdate('requestBoard', [])
+                from toontown.authority.BrowserAuthorityManager import (
+                    requestTransition)
+                def boardAuthorizedElevator():
+                    self.cr.playGame.getPlace().detectedElevatorCollision(self)
+                    self.sendUpdate('requestBoard', [])
+                requestTransition(
+                    'building.board',
+                    {'elevator': self.doId, 'zone': self.zoneId},
+                    boardAuthorizedElevator)
         else:
             place = base.cr.playGame.getPlace()
             if place:

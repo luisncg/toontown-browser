@@ -1062,7 +1062,16 @@ class DistributedBattleBase(DistributedNode, BattleBase):
 
     def d_requestAttack(self, toonId, track, level, av):
         self.notify.debug('network:requestAttack(%d, %d, %d)' % (track, level, av))
-        self.sendUpdate('requestAttack', [track, level, av])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        requestTransition(
+            'battle.attack',
+            {
+                'battle': self.doId,
+                'track': track,
+                'level': level,
+                'target': av,
+            },
+            lambda: self.sendUpdate('requestAttack', [track, level, av]))
 
     def d_requestPetProxy(self, toonId, av):
         self.notify.debug('network:requestPetProxy(%s)' % av)

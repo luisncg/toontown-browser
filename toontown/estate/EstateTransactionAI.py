@@ -100,6 +100,14 @@ class AstronObjectTransaction:
     def commit(self, oldFields, newFields, callback):
         if set(oldFields) != set(newFields):
             raise ValueError('transaction field sets must match')
+        packedOldFields = {
+            name: self._packValue(name, value)
+            for name, value in oldFields.items()
+        }
+        packedNewFields = {
+            name: self._packValue(name, value)
+            for name, value in newFields.items()
+        }
 
         def handleResult(conflictingFields):
             if conflictingFields is None:
@@ -115,6 +123,16 @@ class AstronObjectTransaction:
             self.air.dbId,
             self.doId,
             self.dclass,
-            dict(newFields),
-            dict(oldFields),
+            packedNewFields,
+            packedOldFields,
             handleResult)
+
+    def _packValue(self, fieldName, value):
+        getField = getattr(self.dclass, 'getFieldByName', None)
+        if getField is None:
+            return value
+        field = getField(fieldName)
+        atomic = field.asAtomicField() if field is not None else None
+        if atomic is not None and atomic.getNumElements() == 1:
+            return (value,)
+        return value

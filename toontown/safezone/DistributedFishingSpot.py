@@ -173,7 +173,11 @@ class DistributedFishingSpot(DistributedObject.DistributedObject):
             self.dialog = TeaserPanel.TeaserPanel(pageName='fishing', doneFunc=self.handleOkTeaser)
 
     def d_requestEnter(self):
-        self.sendUpdate('requestEnter', [])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        requestTransition(
+            'fishing.enter',
+            {'spot': self.doId, 'zone': self.zoneId},
+            lambda: self.sendUpdate('requestEnter', []))
 
     def rejectEnter(self):
         self.cr.playGame.getPlace().setState('walk')
@@ -182,7 +186,11 @@ class DistributedFishingSpot(DistributedObject.DistributedObject):
         self.sendUpdate('requestExit', [])
 
     def d_doCast(self, power, heading):
-        self.sendUpdate('doCast', [power, heading])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        requestTransition(
+            'fishing.cast',
+            {'spot': self.doId, 'zone': self.zoneId},
+            lambda: self.sendUpdate('doCast', [power, heading]))
 
     def getSphereRadius(self):
         return 1.5

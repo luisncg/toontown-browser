@@ -184,6 +184,14 @@ class DistributedElevatorAI(DistributedObjectAI.DistributedObjectAI):
                 self.rejectingBoardersHandler(*newArgs)
                 return
             if boardResponse == 0:
+                from toontown.authority.BrowserAuthorityManagerAI import (
+                    consumeProtectedTransition)
+                if not consumeProtectedTransition(
+                        self.air,
+                        avId,
+                        'building.board',
+                        {'elevator': self.doId, 'zone': self.zoneId}):
+                    return
                 self.acceptingBoardersHandler(*newArgs)
             else:
                 self.rejectingBoardersHandler(*newArgs)

@@ -63,6 +63,14 @@ class DistributedFishingSpotAI(DistributedObjectAI):
                 self._record(avId, 'entered fishing spot twice')
             self.sendUpdateToAvatarId(avId, 'rejectEnter', [])
             return
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition)
+        if not consumeProtectedTransition(
+                self.air,
+                avId,
+                'fishing.enter',
+                {'spot': self.doId, 'zone': self.zoneId}):
+            return
         self.acceptOnce(
             self.air.getAvatarExitEvent(avId), self._unexpectedExit)
         self.b_setOccupied(avId)
@@ -111,6 +119,14 @@ class DistributedFishingSpotAI(DistributedObjectAI):
         if oldMoney < cost:
             self._record(avId, 'cast without enough pocket jellybeans')
             return
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition)
+        if not consumeProtectedTransition(
+                self.air,
+                avId,
+                'fishing.cast',
+                {'spot': getattr(self, 'doId', 0), 'zone': self.zoneId}):
+            return
         transaction = AstronObjectTransaction(
             self.air, avatar.doId,
             self.air.dclassesByName['DistributedToonAI'])
@@ -128,6 +144,16 @@ class DistributedFishingSpotAI(DistributedObjectAI):
                 return
             avatar.setMoney(oldMoney - cost)
             avatar.d_setMoney(oldMoney - cost)
+            authority = getattr(self.air, 'browserAuthorityManager', None)
+            if authority is not None:
+                authority.recordProgressionMutation(
+                    avId,
+                    'fishing.cast.debit',
+                    {
+                        'cost': int(cost),
+                        'balance': int(oldMoney - cost),
+                        'pond': int(self.pondDoId),
+                    })
             if self.avId != avId:
                 return
             self.cast = True

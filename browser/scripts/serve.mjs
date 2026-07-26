@@ -26,6 +26,17 @@ import {
   verifyRuntimeRegistration,
   verifyRuntimeRequestProof,
 } from "../shared/runtime-authority.mjs";
+import {
+  createGameSessionState,
+  createSignedFeatureModule,
+  createGameTransitionCapability,
+  GAME_AUTHORITY_PROTOCOL,
+  verifyGameSessionState,
+} from "../shared/game-authority.mjs";
+import {
+  featureModuleById,
+  worldCompositionForZone,
+} from "../server/world-composition.mjs";
 
 const root = resolve(process.argv[2] ?? "dist-web");
 const projectRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -38,6 +49,11 @@ const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY ?? "";
 const sessionSecret = process.env.TURNSTILE_SESSION_SECRET ?? "";
 const gatewayLeaseSecret = process.env.GATEWAY_LEASE_SECRET ?? "";
 const runtimeAuthoritySecret = process.env.RUNTIME_AUTHORITY_SECRET ?? "";
+const gameAuthoritySecret = production
+  ? runtimeAuthoritySecret
+  : createHash("sha256")
+      .update("toontown-browser-local-game-authority-v1", "utf8")
+      .digest("base64url");
 const VERIFY_WINDOW_MS = 60_000;
 const VERIFY_LIMIT = 10;
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
@@ -57,6 +73,13 @@ const RUNTIME_AUTHORIZE_WINDOW_MS = 60_000;
 const RUNTIME_AUTHORIZE_LIMIT = 12;
 const WORLD_CAPABILITY_WINDOW_MS = 60_000;
 const WORLD_CAPABILITY_LIMIT = 30;
+const GAME_SESSION_WINDOW_MS = 60_000;
+const GAME_SESSION_LIMIT = 12;
+const GAME_TRANSITION_WINDOW_MS = 60_000;
+const GAME_TRANSITION_LIMIT = 90;
+const FEATURE_MODULE_WINDOW_MS = 60_000;
+const FEATURE_MODULE_LIMIT = 30;
+const MAX_FEATURE_MODULE_BATCH = 8;
 const MAX_RUNTIME_BODY_BYTES = 16 * 1024;
 const MAX_WORLD_CAPABILITY_ZONES = 16;
 const PRIVATE_ASSET_NAME =
@@ -68,6 +91,9 @@ const gatewayLeaseWindows = new Map();
 const runtimeChallengeWindows = new Map();
 const runtimeAuthorizeWindows = new Map();
 const worldCapabilityWindows = new Map();
+const gameSessionWindows = new Map();
+const gameTransitionWindows = new Map();
+const featureModuleWindows = new Map();
 const runtimeChallengeUses = new Map();
 const runtimeProofUses = new Map();
 const r2AssetStore = createR2AssetStoreFromEnvironment({
@@ -267,12 +293,15 @@ function runtimeRelease() {
 function runtimeContext(request, sessionKey = bootstrapSessionDigest(
   request.headers,
 )) {
+  const requestOrigin = String(request.headers.origin ?? "").trim();
   return {
     sessionKey,
     release: runtimeRelease(),
     clientAddress: requestIp(request),
     userAgent: String(request.headers["user-agent"] ?? "").slice(0, 1_024),
-    origin: publicOrigin,
+    origin: production
+      ? publicOrigin
+      : requestOrigin || `http://127.0.0.1:${port}`,
   };
 }
 
@@ -296,6 +325,7 @@ function verifyRuntimeProof(request, pathname, rawBody) {
   if (!production) {
     return Object.freeze({
       authorizationId: "0".repeat(32),
+      thumbprint: "0".repeat(64),
       release: runtimeRelease(),
       expiresAt: Number.MAX_SAFE_INTEGER,
     });
@@ -1389,20 +1419,258 @@ async function issueWorldCapabilities(request, response) {
   }
   const context = runtimeContext(request);
   try {
-    const capabilities = body.zoneIds.map((zoneId) =>
-      createWorldCapability({
-        secret: runtimeAuthoritySecret,
+    let state = null;
+    if (typeof body.stateToken === "string") {
+      state = verifyGameSessionState({
+        secret: gameAuthoritySecret,
+        stateToken: body.stateToken,
+        release: proof.release,
+        thumbprint: proof.thumbprint,
+      });
+      if (!state) {
+        json(response, 403, { ok: false });
+        return;
+      }
+    }
+    const capabilities = body.zoneIds.map((zoneId) => {
+      const requiredPhases = requiredPhasesForZone(zoneId);
+      const composition = worldCompositionForZone(zoneId, requiredPhases);
+      return {
+        ...createWorldCapability({
+        secret: production ? runtimeAuthoritySecret : gameAuthoritySecret,
         authorizationId: proof.authorizationId,
         zoneId,
-        requiredPhases: requiredPhasesForZone(zoneId),
-        contentEpoch: `world-v1-${context.release.slice(0, 12)}`,
+          requiredPhases: composition.requiredPhases,
+          contentEpoch: composition.epoch,
+          compositionDigest: composition.digest,
+          forensicMarker: state?.m ?? "",
         ...context,
-      })
-    );
+        }),
+        composition,
+      };
+    });
     json(response, 200, {
       version: RUNTIME_AUTHORITY_PROTOCOL,
       release: context.release,
       capabilities,
+    });
+  } catch {
+    json(response, 503, { ok: false });
+  }
+}
+
+async function issueGameSession(request, response) {
+  if (request.method !== "POST") {
+    json(response, 405, { ok: false }, { Allow: "POST" });
+    return;
+  }
+  if (
+    production &&
+    (!verifyBootstrapSession(request.headers, sessionSecret) ||
+      request.headers.origin !== publicOrigin)
+  ) {
+    json(response, 401, { ok: false });
+    return;
+  }
+  let body;
+  let raw;
+  try {
+    ({ value: body, raw } = await readJsonBodyWithRaw(
+      request,
+      MAX_RUNTIME_BODY_BYTES,
+    ));
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  const proof = verifyRuntimeProof(request, "/api/runtime/game-session", raw);
+  if (
+    !proof ||
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    Object.keys(body).length !== 0
+  ) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  if (!consumeWindow(
+    gameSessionWindows,
+    proof.thumbprint,
+    GAME_SESSION_WINDOW_MS,
+    GAME_SESSION_LIMIT,
+  )) {
+    json(response, 429, { ok: false });
+    return;
+  }
+  try {
+    json(response, 200, createGameSessionState({
+      secret: gameAuthoritySecret,
+      release: proof.release,
+      thumbprint: proof.thumbprint,
+    }));
+  } catch {
+    json(response, 503, { ok: false });
+  }
+}
+
+async function issueGameTransition(request, response) {
+  if (request.method !== "POST") {
+    json(response, 405, { ok: false }, { Allow: "POST" });
+    return;
+  }
+  if (
+    production &&
+    (!verifyBootstrapSession(request.headers, sessionSecret) ||
+      request.headers.origin !== publicOrigin)
+  ) {
+    json(response, 401, { ok: false });
+    return;
+  }
+  let body;
+  let raw;
+  try {
+    ({ value: body, raw } = await readJsonBodyWithRaw(
+      request,
+      MAX_RUNTIME_BODY_BYTES,
+    ));
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  const proof = verifyRuntimeProof(
+    request,
+    "/api/runtime/game-transitions",
+    raw,
+  );
+  if (
+    !proof ||
+    !body ||
+    typeof body.stateToken !== "string" ||
+    typeof body.action !== "string" ||
+    !body.target
+  ) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  const state = verifyGameSessionState({
+    secret: gameAuthoritySecret,
+    stateToken: body.stateToken,
+    release: proof.release,
+    thumbprint: proof.thumbprint,
+  });
+  if (!state) {
+    json(response, 409, { ok: false });
+    return;
+  }
+  if (!consumeWindow(
+    gameTransitionWindows,
+    state.sid,
+    GAME_TRANSITION_WINDOW_MS,
+    GAME_TRANSITION_LIMIT,
+  )) {
+    json(response, 429, { ok: false });
+    return;
+  }
+  try {
+    json(response, 200, createGameTransitionCapability({
+      secret: gameAuthoritySecret,
+      stateToken: body.stateToken,
+      release: proof.release,
+      thumbprint: proof.thumbprint,
+      action: body.action,
+      target: body.target,
+    }));
+  } catch {
+    json(response, 400, { ok: false });
+  }
+}
+
+async function issueFeatureModules(request, response) {
+  if (request.method !== "POST") {
+    json(response, 405, { ok: false }, { Allow: "POST" });
+    return;
+  }
+  if (
+    production &&
+    (!verifyBootstrapSession(request.headers, sessionSecret) ||
+      request.headers.origin !== publicOrigin)
+  ) {
+    json(response, 401, { ok: false });
+    return;
+  }
+  let body;
+  let raw;
+  try {
+    ({ value: body, raw } = await readJsonBodyWithRaw(
+      request,
+      MAX_RUNTIME_BODY_BYTES,
+    ));
+  } catch {
+    json(response, 400, { ok: false });
+    return;
+  }
+  const proof = verifyRuntimeProof(
+    request,
+    "/api/runtime/feature-modules",
+    raw,
+  );
+  if (
+    !proof ||
+    !body ||
+    typeof body.stateToken !== "string" ||
+    !Array.isArray(body.moduleIds) ||
+    body.moduleIds.length < 1 ||
+    body.moduleIds.length > MAX_FEATURE_MODULE_BATCH ||
+    new Set(body.moduleIds).size !== body.moduleIds.length
+  ) {
+    json(response, 403, { ok: false });
+    return;
+  }
+  const state = verifyGameSessionState({
+    secret: gameAuthoritySecret,
+    stateToken: body.stateToken,
+    release: proof.release,
+    thumbprint: proof.thumbprint,
+  });
+  if (!state) {
+    json(response, 409, { ok: false });
+    return;
+  }
+  const definitions = body.moduleIds.map((moduleId) => ({
+    moduleId,
+    module: featureModuleById(moduleId),
+  }));
+  if (definitions.some(({ moduleId, module }) => (
+    typeof moduleId !== "string" || module === null
+  ))) {
+    json(response, 400, { ok: false });
+    return;
+  }
+  if (!consumeWindow(
+    featureModuleWindows,
+    state.sid,
+    FEATURE_MODULE_WINDOW_MS,
+    FEATURE_MODULE_LIMIT,
+  )) {
+    json(response, 429, { ok: false });
+    return;
+  }
+  try {
+    const modules = definitions.map(({ moduleId, module }) =>
+      createSignedFeatureModule({
+        secret: gameAuthoritySecret,
+        stateToken: body.stateToken,
+        release: proof.release,
+        thumbprint: proof.thumbprint,
+        moduleId,
+        module,
+      })
+    );
+    json(response, 200, {
+      version: GAME_AUTHORITY_PROTOCOL,
+      release: proof.release,
+      modules,
     });
   } catch {
     json(response, 503, { ok: false });
@@ -1771,6 +2039,18 @@ export function createWebServer() {
     }
     if (pathname === "/api/runtime/world-capabilities") {
       await issueWorldCapabilities(request, response);
+      return;
+    }
+    if (pathname === "/api/runtime/game-session") {
+      await issueGameSession(request, response);
+      return;
+    }
+    if (pathname === "/api/runtime/game-transitions") {
+      await issueGameTransition(request, response);
+      return;
+    }
+    if (pathname === "/api/runtime/feature-modules") {
+      await issueFeatureModules(request, response);
       return;
     }
     if (pathname === "/api/performance") {

@@ -503,6 +503,8 @@ export function createWorldCapability({
   zoneId,
   requiredPhases,
   contentEpoch,
+  compositionDigest = "",
+  forensicMarker = "",
   now = Date.now(),
   ttlSeconds = 10 * 60,
   ...context
@@ -527,6 +529,15 @@ export function createWorldCapability({
   ) {
     throw new Error("World content epoch is invalid");
   }
+  if (
+    compositionDigest &&
+    !/^[a-f0-9]{64}$/.test(compositionDigest)
+  ) {
+    throw new Error("World composition digest is invalid");
+  }
+  if (forensicMarker && !/^[A-Za-z0-9_-]{22}$/.test(forensicMarker)) {
+    throw new Error("World forensic marker is invalid");
+  }
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 30 * 60) {
     throw new Error("World capability TTL must be 60-1800 seconds");
   }
@@ -542,6 +553,8 @@ export function createWorldCapability({
     z: zoneId,
     ph: phases,
     ce: contentEpoch,
+    ...(compositionDigest ? { cd: compositionDigest } : {}),
+    ...(forensicMarker ? { m: forensicMarker } : {}),
     ...requireContext(context),
   };
   return Object.freeze({
@@ -550,6 +563,8 @@ export function createWorldCapability({
     zoneId,
     requiredPhases: Object.freeze(phases),
     contentEpoch,
+    compositionDigest,
+    forensicMarker,
     capability: sealToken("world", payload, secret),
     expiresAt: payload.exp * 1_000,
   });

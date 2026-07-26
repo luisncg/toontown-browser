@@ -35,6 +35,21 @@ class FakeAir:
         self.dbInterface = FakeDatabaseInterface(result)
 
 
+class FakeAtomicField:
+    def getNumElements(self):
+        return 1
+
+
+class FakeField:
+    def asAtomicField(self):
+        return FakeAtomicField()
+
+
+class FakeDClass:
+    def getFieldByName(self, name):
+        return FakeField()
+
+
 class EstateTransactionTests(unittest.TestCase):
     def test_multi_field_compare_and_swap_success(self):
         air = FakeAir()
@@ -79,6 +94,33 @@ class EstateTransactionTests(unittest.TestCase):
                 {'setInteriorItems': b'new'},
                 lambda committed, conflict: None)
         self.assertEqual(air.dbInterface.calls, [])
+
+    def test_single_array_arguments_are_wrapped_for_dc_packing(self):
+        air = FakeAir()
+        transaction = AstronObjectTransaction(air, 1234, FakeDClass())
+        transaction.commit(
+            {'setSlot0Items': []},
+            {'setSlot0Items': [[49, 0, 0, 0, 0]]},
+            lambda committed, conflict: None)
+        self.assertEqual(
+            air.dbInterface.calls[0][4]['setSlot0Items'], ([],))
+        self.assertEqual(
+            air.dbInterface.calls[0][3]['setSlot0Items'],
+            ([[49, 0, 0, 0, 0]],))
+
+    def test_single_scalar_arguments_are_wrapped_for_dc_packing(self):
+        air = FakeAir()
+        transaction = AstronObjectTransaction(air, 1234, FakeDClass())
+        transaction.commit(
+            {'setLastEpochTimeStamp': 1784378865},
+            {'setLastEpochTimeStamp': 1784378866},
+            lambda committed, conflict: None)
+        self.assertEqual(
+            air.dbInterface.calls[0][4]['setLastEpochTimeStamp'],
+            (1784378865,))
+        self.assertEqual(
+            air.dbInterface.calls[0][3]['setLastEpochTimeStamp'],
+            (1784378866,))
 
     def test_response_cache_replays_only_matching_payload(self):
         cache = ResponseReplayCache(capacity=2)

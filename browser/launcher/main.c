@@ -395,6 +395,167 @@ static int install_browser_assets_module(void) {
   return 1;
 }
 
+static PyObject *browser_authority_prepare_session(PyObject *, PyObject *) {
+  const int accepted = EM_ASM_INT({
+    const authority = window.ToontownRuntimeAuthority;
+    if (!authority || typeof authority.prepareGameSession !== "function") {
+      return 0;
+    }
+    try {
+      authority.prepareGameSession().catch((error) => {
+        console.error("[Toontown authority] game session failed", error);
+      });
+      return 1;
+    } catch (error) {
+      return 0;
+    }
+  });
+  return PyBool_FromLong(accepted);
+}
+
+static PyObject *browser_authority_session_state(PyObject *, PyObject *) {
+  char *value = reinterpret_cast<char *>(EM_ASM_PTR({
+    try {
+      const authority = window.ToontownRuntimeAuthority;
+      const state = authority &&
+        typeof authority.gameSessionSnapshot === "function"
+        ? authority.gameSessionSnapshot()
+        : undefined;
+      if (!state) return 0;
+      const value = JSON.stringify(state);
+      const size = lengthBytesUTF8(value) + 1;
+      const pointer = _malloc(size);
+      stringToUTF8(value, pointer, size);
+      return pointer;
+    } catch (error) {
+      return 0;
+    }
+  }));
+  if (value == NULL) {
+    Py_RETURN_NONE;
+  }
+  PyObject *result = PyUnicode_DecodeUTF8(value, strlen(value), "strict");
+  free(value);
+  return result;
+}
+
+static PyObject *browser_authority_request_transition(
+    PyObject *, PyObject *args) {
+  unsigned int request_id;
+  const char *action;
+  const char *target_json;
+  if (!PyArg_ParseTuple(args, "Iss", &request_id, &action, &target_json)) {
+    return NULL;
+  }
+  const int accepted = EM_ASM_INT({
+    try {
+      const authority = window.ToontownRuntimeAuthority;
+      if (
+        !authority ||
+        typeof authority.requestGameTransition !== "function"
+      ) return 0;
+      return authority.requestGameTransition(
+        $0,
+        UTF8ToString($1),
+        JSON.parse(UTF8ToString($2)),
+      ) ? 1 : 0;
+    } catch (error) {
+      console.error("[Toontown authority] transition bridge failed", error);
+      return 0;
+    }
+  }, request_id, action, target_json);
+  return PyBool_FromLong(accepted);
+}
+
+static PyObject *browser_authority_poll_transition(
+    PyObject *, PyObject *args) {
+  unsigned int request_id;
+  if (!PyArg_ParseTuple(args, "I", &request_id)) {
+    return NULL;
+  }
+  char *value = reinterpret_cast<char *>(EM_ASM_PTR({
+    try {
+      const authority = window.ToontownRuntimeAuthority;
+      const result = authority &&
+        typeof authority.pollGameTransition === "function"
+        ? authority.pollGameTransition($0)
+        : undefined;
+      if (!result) return 0;
+      const value = JSON.stringify(result);
+      const size = lengthBytesUTF8(value) + 1;
+      const pointer = _malloc(size);
+      stringToUTF8(value, pointer, size);
+      return pointer;
+    } catch (error) {
+      return 0;
+    }
+  }, request_id));
+  if (value == NULL) {
+    Py_RETURN_NONE;
+  }
+  PyObject *result = PyUnicode_DecodeUTF8(value, strlen(value), "strict");
+  free(value);
+  return result;
+}
+
+static PyObject *browser_authority_commit_state(PyObject *, PyObject *args) {
+  const char *state_json;
+  if (!PyArg_ParseTuple(args, "s", &state_json)) {
+    return NULL;
+  }
+  const int committed = EM_ASM_INT({
+    try {
+      const authority = window.ToontownRuntimeAuthority;
+      return authority &&
+        typeof authority.commitGameSessionState === "function" &&
+        authority.commitGameSessionState(JSON.parse(UTF8ToString($0)))
+        ? 1
+        : 0;
+    } catch (error) {
+      return 0;
+    }
+  }, state_json);
+  return PyBool_FromLong(committed);
+}
+
+static PyMethodDef browser_authority_methods[] = {
+  {"prepare_session", browser_authority_prepare_session, METH_NOARGS,
+   "Begin the proof-bound browser game session handshake."},
+  {"session_state", browser_authority_session_state, METH_NOARGS,
+   "Return the current signed game session state as JSON, or None."},
+  {"request_transition", browser_authority_request_transition, METH_VARARGS,
+   "Request a chained transition capability asynchronously."},
+  {"poll_transition", browser_authority_poll_transition, METH_VARARGS,
+   "Return a completed transition request as JSON, or None."},
+  {"commit_state", browser_authority_commit_state, METH_VARARGS,
+   "Commit the AI-approved successor game state."},
+  {NULL, NULL, 0, NULL},
+};
+
+static PyModuleDef browser_authority_module = {
+  PyModuleDef_HEAD_INIT,
+  "browser_authority",
+  "Proof-bound browser-to-AI transition authority bridge.",
+  -1,
+  browser_authority_methods,
+};
+
+static int install_browser_authority_module(void) {
+  PyObject *module = PyModule_Create(&browser_authority_module);
+  if (module == NULL) {
+    PyErr_Print();
+    return 0;
+  }
+  const int result = PyDict_SetItemString(
+    PyImport_GetModuleDict(), "browser_authority", module);
+  Py_DECREF(module);
+  if (result < 0) {
+    PyErr_Print();
+    return 0;
+  }
+  return 1;
+}
+
 static void browser_status(const char *phase, const char *message) {
   EM_ASM({
     const phase = UTF8ToString($0);
@@ -619,6 +780,10 @@ int main(void) {
   }
   if (!install_browser_assets_module()) {
     browser_status("error", "Browser phase streaming could not be initialized.");
+    return 1;
+  }
+  if (!install_browser_authority_module()) {
+    browser_status("error", "Browser transition authority could not be initialized.");
     return 1;
   }
 

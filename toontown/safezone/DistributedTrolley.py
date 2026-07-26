@@ -187,8 +187,11 @@ class DistributedTrolley(DistributedObject.DistributedObject):
             self.dialog = TeaserPanel.TeaserPanel(pageName='minigames', doneFunc=self.handleOkTeaser)
 
     def handleEnterTrolley(self):
-        toon = base.localAvatar
-        self.sendUpdate('requestBoard', [])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        requestTransition(
+            'trolley.board',
+            {'trolley': self.doId, 'zone': self.zoneId},
+            lambda: self.sendUpdate('requestBoard', []))
 
     def fillSlot0(self, avId):
         self.fillSlot(0, avId)

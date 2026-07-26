@@ -162,6 +162,14 @@ class DistributedTrolleyAI(DistributedObjectAI.DistributedObjectAI):
                 self.rejectingBoardersHandler(*newArgs)
                 return
             if av.hp > 0 and self.accepting:
+                from toontown.authority.BrowserAuthorityManagerAI import (
+                    consumeProtectedTransition)
+                if not consumeProtectedTransition(
+                        self.air,
+                        avId,
+                        'trolley.board',
+                        {'trolley': self.doId, 'zone': self.zoneId}):
+                    return
                 self.acceptingBoardersHandler(*newArgs)
             else:
                 self.rejectingBoardersHandler(*newArgs)

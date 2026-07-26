@@ -1042,6 +1042,7 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
                 self.air.writeServerEvent('suspicious', toonId, 'requestAttack: non-paid player requesting attack with paid gag')
                 return
 
+        previousAttack = self.toonAttacks.get(toonId)
         if isReactiveTrack(track):
             if not self.validate(toonId, isImplementedReactiveGag(track, level),
                                  'requestAttack: unavailable reactive gag track %s level %s' % (track, level)):
@@ -1123,6 +1124,23 @@ class DistributedBattleBaseAI(DistributedObjectAI.DistributedObjectAI, BattleBas
                 self.toonAttacks[toonId] = getToonAttack(toonId, track=track, level=level, target=av)
                 if av == -1 and not attackAffectsGroup(track, level):
                     validResponse = 0
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition)
+        if not consumeProtectedTransition(
+                self.air,
+                toonId,
+                'battle.attack',
+                {
+                    'battle': getattr(self, 'doId', 0),
+                    'track': track,
+                    'level': level,
+                    'target': av,
+                }):
+            if previousAttack is None:
+                self.toonAttacks.pop(toonId, None)
+            else:
+                self.toonAttacks[toonId] = previousAttack
+            return
         self.d_setChosenToonAttacks()
         if validResponse == 1:
             self.responses[toonId] += 1

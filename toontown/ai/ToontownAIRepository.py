@@ -9,6 +9,7 @@ from toontown.ai.HolidayManagerAI import HolidayManagerAI
 from toontown.ai.NewsManagerAI import NewsManagerAI
 from toontown.ai.WelcomeValleyManagerAI import WelcomeValleyManagerAI
 from toontown.building.DistributedTrophyMgrAI import DistributedTrophyMgrAI
+from toontown.authority.BrowserAuthorityManagerAI import BrowserAuthorityManagerAI
 from toontown.catalog.CatalogManagerAI import CatalogManagerAI
 from toontown.coghq.CogSuitManagerAI import CogSuitManagerAI
 from toontown.coghq.CountryClubManagerAI import CountryClubManagerAI
@@ -99,6 +100,7 @@ class ToontownAIRepository(ToontownInternalRepository):
         self.magicWordManager = None
         self.partyManager = None
         self.estateMgr = None
+        self.browserAuthorityManager = None
         self.fishManager = None
         self.bingoManager = None
         self.zoneTable = {}
@@ -246,6 +248,12 @@ class ToontownAIRepository(ToontownInternalRepository):
         # Generate the estate manager before clients request their estate zone.
         self.estateMgr = EstateManagerAI(self)
         self.estateMgr.generateWithRequired(OTP_ZONE_ID_MANAGEMENT)
+
+        # Bind browser proof-of-possession sessions to authenticated Toons and
+        # consume chained capabilities at protected gameplay boundaries.
+        self.browserAuthorityManager = BrowserAuthorityManagerAI(self)
+        self.browserAuthorityManager.generateWithRequired(
+            OTP_ZONE_ID_MANAGEMENT)
 
         # Generate our party manager...
         self.partyManager = DistributedPartyManagerAI(self)

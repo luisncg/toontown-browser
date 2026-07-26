@@ -36,7 +36,11 @@ class EstateManager(DistributedObject.DistributedObject):
         name = ''
         if base.localAvatar.doId == avId:
             name = base.cr.userName
-        self.sendUpdate('getEstateZone', [avId, name])
+        from toontown.authority.BrowserAuthorityManager import requestTransition
+        requestTransition(
+            'estate.enter',
+            {'manager': self.doId, 'owner': avId},
+            lambda: self.sendUpdate('getEstateZone', [avId, name]))
 
     def setEstateZone(self, ownerId, zoneId):
         self.notify.debug('setEstateZone(%s, %s)' % (ownerId, zoneId))

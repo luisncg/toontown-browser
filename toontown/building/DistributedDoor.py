@@ -303,8 +303,15 @@ class DistributedDoor(DistributedObject, DelayDeletable):
 
     def enterDoor(self):
         if self.allowedToEnter():
-            messenger.send('DistributedDoor_doorTrigger')
-            self.sendUpdate('requestEnter')
+            from toontown.authority.BrowserAuthorityManager import (
+                requestTransition)
+            def enterAuthorizedDoor():
+                messenger.send('DistributedDoor_doorTrigger')
+                self.sendUpdate('requestEnter')
+            requestTransition(
+                'door.enter',
+                {'door': self.doId, 'zone': self.zoneId},
+                enterAuthorizedDoor)
         else:
             place = base.cr.playGame.getPlace()
             if place:

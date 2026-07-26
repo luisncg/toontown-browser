@@ -65,6 +65,7 @@ from toontown.minigame import DistributedCatchGame/AI
 from toontown.minigame import DistributedDivingGame/AI
 from toontown.minigame import DistributedTargetGame/AI
 from toontown.estate import EstateManager/AI
+from toontown.authority import BrowserAuthorityManager/AI
 from toontown.estate import DistributedEstate/AI
 from toontown.estate import DistributedHouse/AI
 from toontown.estate import DistributedHouseInterior/AI
@@ -3285,4 +3286,15 @@ dclass DistributedTrashcanZeroMgr : DistributedPhaseEventMgr {
 };
 
 dclass DistributedSillyMeterMgr : DistributedPhaseEventMgr {
+};
+
+// Keep this browser-only class at the end of the legacy schema. Appending it
+// preserves every existing dclass and field number used by persistent objects.
+dclass BrowserAuthorityManager : DistributedObject {
+  registerRuntime(string) airecv clsend;
+  runtimeReady(uint32, string) ownrecv;
+  presentCapability(uint32, string) airecv clsend;
+  capabilityAccepted(uint32) ownrecv;
+  transitionCommitted(uint32, string, string) ownrecv;
+  transitionRejected(uint32, uint8) ownrecv;
 };

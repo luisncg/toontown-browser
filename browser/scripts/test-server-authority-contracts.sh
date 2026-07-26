@@ -6,6 +6,11 @@ cd "$PROJECT_ROOT"
 
 npm run test:password-auth
 npm run test:login-rate-limit
+npm run test:game-authority
+npm run test:game-authority-python
+npm run test:game-authority-manager
+npm run test:game-authority-ledger
+npm run test:dc-schema-compatibility
 npm run test:estate-transactions
 npm run test:bingo-native
 npm run test:reactive-native
