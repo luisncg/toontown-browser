@@ -3,7 +3,10 @@ import { openAssetTicket } from "../../shared/asset-ticket.mjs";
 const MAX_SESSION_AGE_SECONDS = 6 * 60 * 60;
 const MAX_TICKET_FUTURE_SECONDS = 5 * 60;
 const BUDGET_WINDOW_MILLISECONDS = 15 * 60 * 1_000;
-const RESERVATION_TTL_MILLISECONDS = 5 * 60 * 1_000;
+// Browser/tab termination is not guaranteed to propagate a stream cancel all
+// the way back to a Worker. Expire abandoned reservations quickly enough that
+// a retry or refresh cannot be locked out for several minutes.
+const RESERVATION_TTL_MILLISECONDS = 90 * 1_000;
 const SESSION_BYTE_BUDGET = 768 * 1024 * 1024;
 const IP_BYTE_BUDGET = 4 * 1024 * 1024 * 1024;
 // Boot overlaps four Phase 4 parts, the main data/WASM pair, two short audio
@@ -181,7 +184,9 @@ async function reserveAsset(environment, session, ipDigest, ticketDigest, bytes)
     sessionName,
     { scope: "session", ticket: ticketDigest, bytes },
   );
-  if (!sessionResponse.ok) return { response: sessionResponse };
+  if (!sessionResponse.ok) {
+    return { response: sessionResponse, budgetScope: "session" };
+  }
   const sessionValue = await sessionResponse.json();
   const ipResponse = await budgetRequest(
     environment.ASSET_BUDGETS,
@@ -194,7 +199,7 @@ async function reserveAsset(environment, session, ipDigest, ticketDigest, bytes)
       sessionName,
       sessionValue.reservation,
     );
-    return { response: ipResponse };
+    return { response: ipResponse, budgetScope: "ip" };
   }
   const ipValue = await ipResponse.json();
   return {
@@ -297,6 +302,8 @@ export default {
             "Content-Type": "application/json; charset=utf-8",
             "Cache-Control": "private, no-store",
             "Retry-After": "60",
+            "X-Toontown-Asset-Budget-Scope":
+              reservation.budgetScope || "unknown",
             "X-Content-Type-Options": "nosniff",
           },
         });

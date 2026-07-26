@@ -157,10 +157,15 @@ for (let attempt = 0; attempt < 2; attempt += 1) {
   assert.equal(retry.status, 200);
   await retry.arrayBuffer();
 }
+const replayLimited = await worker.fetch(request(validToken), environment);
 assert.equal(
-  (await worker.fetch(request(validToken), environment)).status,
+  replayLimited.status,
   429,
   "the same opaque asset ticket must have a bounded replay count",
+);
+assert.equal(
+  replayLimited.headers.get("x-toontown-asset-budget-scope"),
+  "session",
 );
 
 assert.equal((await worker.fetch(request(validToken, { cookie: "" }), environment)).status, 401);

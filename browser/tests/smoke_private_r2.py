@@ -92,6 +92,10 @@ with sync_playwright() as playwright:
                             )
                         ),
                         "status": response.status,
+                        "budgetScope": response.headers.get(
+                            "x-toontown-asset-budget-scope",
+                            "",
+                        ),
                         "cache": response.headers.get("cache-control", ""),
                         "encoding": response.headers.get("content-encoding", ""),
                         "disposition": response.headers.get("content-disposition", ""),
