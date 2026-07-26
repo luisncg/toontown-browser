@@ -424,13 +424,13 @@ footer {
   right: 0;
   left: 0;
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 20px;
   color: #7f8ca0;
   font-size: 12px;
 }
 
-.keys { text-align: right; }
+.keys { text-align: center; }
 
 .mobile-controls {
   display: none;
@@ -444,8 +444,8 @@ footer {
   .shell { width: min(calc(100% - 24px), 1600px); }
   .masthead { bottom: calc(100% + 16px); }
   .stage { min-height: 0; border-radius: 16px; }
-  footer { justify-content: flex-start; }
-  .keys { text-align: left; }
+  footer { justify-content: center; }
+  .keys { text-align: center; }
 
   .welcome-overlay {
     align-items: center;
