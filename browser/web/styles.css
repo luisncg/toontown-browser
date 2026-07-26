@@ -281,10 +281,11 @@ html.welcome-required .welcome-overlay {
 
 h1 {
   margin: 0;
-  font-size: clamp(38px, 6.7vw, 86px);
+  font-size: clamp(28px, 4vw, 54px);
   font-weight: 850;
-  letter-spacing: -.07em;
-  line-height: .9;
+  letter-spacing: -.045em;
+  line-height: 1;
+  text-align: center;
 }
 
 .stage {
