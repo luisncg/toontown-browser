@@ -41,7 +41,7 @@ def main():
             ),
         )
         def capture_response(response):
-            if "audio-bank-tutorial-battle-v1.data" in response.url:
+            if "audio-bank-tutorial-battle-v2.data" in response.url:
                 bank_responses.append((response.url, response.status))
             if response.status >= 400:
                 error_responses.append((response.url, response.status))
@@ -62,7 +62,7 @@ def main():
             page.wait_for_function(
                 """
                 () => window.ToontownShortAudioBanks?.diagnostics()
-                  .decodedSounds === 9
+                  .decodedSounds === 10
                 """,
                 timeout=60_000,
             )
@@ -93,8 +93,9 @@ def main():
                   )
                 );
                 return value.version === 1 &&
-                  Object.keys(value.sounds).length === 9 &&
-                  value.sounds["sa_shred.ogg"];
+                  Object.keys(value.sounds).length === 10 &&
+                  value.sounds["sa_shred.ogg"] &&
+                  value.sounds["enc_win.ogg"];
               } catch {
                 return false;
               }
@@ -112,7 +113,7 @@ def main():
             """
             () => window.ToontownShortAudioBanks.handleCommand(
               "[BrowserWebAudioCommand] play 999 " +
-              "sa_shred.ogg 0.000000 0 " +
+              "enc_win.ogg 0.000000 0 " +
               "0.050000 1.000000 0.000000 -"
             )
             """
@@ -200,7 +201,7 @@ def main():
             for event in lifecycle["history"]
         ), lifecycle
         assert diagnostics["bankFailures"] == 0, diagnostics
-        assert diagnostics["decodedSounds"] == 9, diagnostics
+        assert diagnostics["decodedSounds"] == 10, diagnostics
         assert diagnostics["banks"]["tutorial-battle"]["state"] == "ready"
         if not BOOTSTRAP_SESSION:
             assert bank_responses, bank_responses

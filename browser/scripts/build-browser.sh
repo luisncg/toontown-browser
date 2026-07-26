@@ -295,8 +295,8 @@ RUNTIME_VERSION="$({
   if [[ -f "$DIST_DIR/audio-bank-manifest.json" ]]; then
     shasum -a 256 "$DIST_DIR/audio-bank-manifest.json"
   fi
-  if [[ -f "$DIST_DIR/audio-bank-tutorial-battle-v1.data" ]]; then
-    shasum -a 256 "$DIST_DIR/audio-bank-tutorial-battle-v1.data"
+  if [[ -f "$DIST_DIR/audio-bank-tutorial-battle-v2.data" ]]; then
+    shasum -a 256 "$DIST_DIR/audio-bank-tutorial-battle-v2.data"
   fi
   if [[ -f "$DIST_DIR/short-audio-banks.js" ]]; then
     shasum -a 256 "$DIST_DIR/short-audio-banks.js"

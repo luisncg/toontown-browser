@@ -3,7 +3,7 @@
   "banks": [
     {
       "id": "tutorial-battle",
-      "asset": "audio-bank-tutorial-battle-v1.data",
+      "asset": "audio-bank-tutorial-battle-v2.data",
       "kind": "short-effects",
       "phase": "boot",
       "relevance": [
@@ -73,6 +73,13 @@
           "logicalName": "av_jump_to_side.ogg",
           "source": "resources/phase_3.5/audio/sfx/AV_jump_to_side.ogg",
           "fallbackPandaAsset": "AV_jump_to_side.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "enc_win.ogg",
+          "source": "resources/phase_3.5/audio/sfx/ENC_Win.ogg",
+          "fallbackPandaAsset": "ENC_Win.ogg",
           "defaultGain": 1.0,
           "loopPoints": null
         }

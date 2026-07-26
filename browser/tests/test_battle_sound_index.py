@@ -88,6 +88,7 @@ class BattleSoundIndexTests(unittest.TestCase):
                 "sa_hangup.ogg",
                 "av_side_step.ogg",
                 "av_jump_to_side.ogg",
+                "enc_win.ogg",
             },
         )
         self.assertNotIn("warmBrowserStarterBattleSounds", battle_sounds)
