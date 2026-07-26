@@ -295,9 +295,12 @@ RUNTIME_VERSION="$({
   if [[ -f "$DIST_DIR/audio-bank-manifest.json" ]]; then
     shasum -a 256 "$DIST_DIR/audio-bank-manifest.json"
   fi
-  if [[ -f "$DIST_DIR/audio-bank-tutorial-battle-v2.data" ]]; then
-    shasum -a 256 "$DIST_DIR/audio-bank-tutorial-battle-v2.data"
-  fi
+  while IFS= read -r audio_bank_asset; do
+    shasum -a 256 "$audio_bank_asset"
+  done < <(
+    find "$DIST_DIR" -maxdepth 1 -type f \
+      -name 'audio-bank-*.data' | sort
+  )
   if [[ -f "$DIST_DIR/short-audio-banks.js" ]]; then
     shasum -a 256 "$DIST_DIR/short-audio-banks.js"
   fi

@@ -1,7 +1,8 @@
+import json
+import re
 import subprocess
 import tempfile
 import unittest
-import json
 from pathlib import Path
 
 
@@ -58,7 +59,7 @@ class BattleSoundIndexTests(unittest.TestCase):
             )
             self.assertIn("Generated 3 browser battle-sound paths", result.stdout)
 
-    def test_starter_battle_buffers_use_async_web_audio_bank(self):
+    def test_battle_buffers_use_async_web_audio_banks(self):
         battle_sounds = (
             PROJECT_DIR / "toontown" / "battle" / "BattleSounds.py"
         ).read_text(encoding="utf-8")
@@ -76,21 +77,23 @@ class BattleSoundIndexTests(unittest.TestCase):
             for bank in bank_config["banks"]
             for sound in bank["sounds"]
         }
-        self.assertEqual(
-            logical_names,
-            {
-                "aa_pie_throw_only.ogg",
-                "aa_tart_only.ogg",
-                "aa_squirt_flowersquirt.ogg",
-                "sa_powertie_throw.ogg",
-                "sa_powertie_impact.ogg",
-                "sa_shred.ogg",
-                "sa_hangup.ogg",
-                "av_side_step.ogg",
-                "av_jump_to_side.ogg",
-                "enc_win.ogg",
-            },
+        movie_suit_attacks = (
+            PROJECT_DIR / "toontown" / "battle" / "MovieSuitAttacks.py"
+        ).read_text(encoding="utf-8")
+        suit_attack_sounds = {
+            name.lower()
+            for name in re.findall(
+                r"""['"]([^'"]+\.ogg)['"]""",
+                movie_suit_attacks,
+            )
+        }
+        self.assertTrue(
+            suit_attack_sounds.issubset(logical_names),
+            suit_attack_sounds - logical_names,
         )
+        self.assertIn("sa_pick_pocket.ogg", logical_names)
+        self.assertIn("enc_win.ogg", logical_names)
+        self.assertEqual(len(logical_names), 47)
         self.assertNotIn("warmBrowserStarterBattleSounds", battle_sounds)
         self.assertNotIn("warmBrowserStarterBattleSounds()", town_loader)
 

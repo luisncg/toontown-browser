@@ -84,6 +84,279 @@
           "loopPoints": null
         }
       ]
+    },
+    {
+      "id": "cog-attacks",
+      "asset": "audio-bank-cog-attacks-v1.data",
+      "kind": "short-effects",
+      "phase": "boot",
+      "relevance": [
+        "battle",
+        "cog-attacks"
+      ],
+      "sampleRate": 22050,
+      "channels": 1,
+      "sounds": [
+        {
+          "logicalName": "sa_audit.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_audit.ogg",
+          "fallbackPandaAsset": "SA_audit.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_brainstorm.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_brainstorm.ogg",
+          "fallbackPandaAsset": "SA_brainstorm.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_buzz_word.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_buzz_word.ogg",
+          "fallbackPandaAsset": "SA_buzz_word.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_canned_impact_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_canned_impact_only.ogg",
+          "fallbackPandaAsset": "SA_canned_impact_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_canned_tossup_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_canned_tossup_only.ogg",
+          "fallbackPandaAsset": "SA_canned_tossup_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_demotion.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_demotion.ogg",
+          "fallbackPandaAsset": "SA_demotion.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_evil_eye.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_evil_eye.ogg",
+          "fallbackPandaAsset": "SA_evil_eye.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_filibuster.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_filibuster.ogg",
+          "fallbackPandaAsset": "SA_filibuster.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_finger_wag.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_finger_wag.ogg",
+          "fallbackPandaAsset": "SA_finger_wag.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_fountain_pen.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_fountain_pen.ogg",
+          "fallbackPandaAsset": "SA_fountain_pen.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_glower_power.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_glower_power.ogg",
+          "fallbackPandaAsset": "SA_glower_power.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_guilt_trip.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_guilt_trip.ogg",
+          "fallbackPandaAsset": "SA_guilt_trip.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_hardball.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_hardball.ogg",
+          "fallbackPandaAsset": "SA_hardball.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_hardball_impact_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_hardball_impact_only.ogg",
+          "fallbackPandaAsset": "SA_hardball_impact_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_head_grow_back_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_head_grow_back_only.ogg",
+          "fallbackPandaAsset": "SA_head_grow_back_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_head_shrink_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_head_shrink_only.ogg",
+          "fallbackPandaAsset": "SA_head_shrink_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_hot_air.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_hot_air.ogg",
+          "fallbackPandaAsset": "SA_hot_air.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_jargon.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_jargon.ogg",
+          "fallbackPandaAsset": "SA_jargon.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_liquidate.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_liquidate.ogg",
+          "fallbackPandaAsset": "SA_liquidate.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_mumbo_jumbo.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_mumbo_jumbo.ogg",
+          "fallbackPandaAsset": "SA_mumbo_jumbo.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_paradigm_shift.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_paradigm_shift.ogg",
+          "fallbackPandaAsset": "SA_paradigm_shift.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_pick_pocket.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_pick_pocket.ogg",
+          "fallbackPandaAsset": "SA_pick_pocket.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_pink_slip.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_pink_slip.ogg",
+          "fallbackPandaAsset": "SA_pink_slip.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_razzle_dazzle.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_razzle_dazzle.ogg",
+          "fallbackPandaAsset": "SA_razzle_dazzle.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_red_tape.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_red_tape.ogg",
+          "fallbackPandaAsset": "SA_red_tape.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_rolodex.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_rolodex.ogg",
+          "fallbackPandaAsset": "SA_rolodex.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_rubber_stamp.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_rubber_stamp.ogg",
+          "fallbackPandaAsset": "SA_rubber_stamp.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_rubout.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_rubout.ogg",
+          "fallbackPandaAsset": "SA_rubout.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_synergy.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_synergy.ogg",
+          "fallbackPandaAsset": "SA_synergy.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_tee_off.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_tee_off.ogg",
+          "fallbackPandaAsset": "SA_tee_off.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_tremor.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_tremor.ogg",
+          "fallbackPandaAsset": "SA_tremor.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_watercooler_appear_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_watercooler_appear_only.ogg",
+          "fallbackPandaAsset": "SA_watercooler_appear_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_watercooler_spray_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_watercooler_spray_only.ogg",
+          "fallbackPandaAsset": "SA_watercooler_spray_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_withdrawl.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_withdrawl.ogg",
+          "fallbackPandaAsset": "SA_withdrawl.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_writeoff_ding_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_writeoff_ding_only.ogg",
+          "fallbackPandaAsset": "SA_writeoff_ding_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "sa_writeoff_pen_only.ogg",
+          "source": "resources/phase_5/audio/sfx/SA_writeoff_pen_only.ogg",
+          "fallbackPandaAsset": "SA_writeoff_pen_only.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        },
+        {
+          "logicalName": "toon_bodyfall_synergy.ogg",
+          "source": "resources/phase_5/audio/sfx/Toon_bodyfall_synergy.ogg",
+          "fallbackPandaAsset": "Toon_bodyfall_synergy.ogg",
+          "defaultGain": 1.0,
+          "loopPoints": null
+        }
+      ]
     }
   ]
 }

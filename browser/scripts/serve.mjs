@@ -599,7 +599,10 @@ const performanceBattleStages = new Set([
   "suit_movie",
   "play_total",
 ]);
-const performanceAudioBanks = new Set(["tutorial-battle"]);
+const performanceAudioBanks = new Set([
+  "tutorial-battle",
+  "cog-attacks",
+]);
 const performanceAudioBankStages = new Set([
   "ready",
   "published",

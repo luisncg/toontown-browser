@@ -41,7 +41,10 @@ def main():
             ),
         )
         def capture_response(response):
-            if "audio-bank-tutorial-battle-v2.data" in response.url:
+            if (
+                "audio-bank-" in response.url
+                and ".data" in response.url
+            ):
                 bank_responses.append((response.url, response.status))
             if response.status >= 400:
                 error_responses.append((response.url, response.status))
@@ -62,7 +65,7 @@ def main():
             page.wait_for_function(
                 """
                 () => window.ToontownShortAudioBanks?.diagnostics()
-                  .decodedSounds === 10
+                  .decodedSounds === 47
                 """,
                 timeout=60_000,
             )
@@ -93,8 +96,9 @@ def main():
                   )
                 );
                 return value.version === 1 &&
-                  Object.keys(value.sounds).length === 10 &&
+                  Object.keys(value.sounds).length === 47 &&
                   value.sounds["sa_shred.ogg"] &&
+                  value.sounds["sa_pick_pocket.ogg"] &&
                   value.sounds["enc_win.ogg"];
               } catch {
                 return false;
@@ -111,20 +115,27 @@ def main():
         )
         played = page.evaluate(
             """
-            () => window.ToontownShortAudioBanks.handleCommand(
-              "[BrowserWebAudioCommand] play 999 " +
-              "enc_win.ogg 0.000000 0 " +
-              "0.050000 1.000000 0.000000 -"
-            )
+            () => [
+              window.ToontownShortAudioBanks.handleCommand(
+                "[BrowserWebAudioCommand] play 998 " +
+                "enc_win.ogg 0.000000 0 " +
+                "0.050000 1.000000 0.000000 -"
+              ),
+              window.ToontownShortAudioBanks.handleCommand(
+                "[BrowserWebAudioCommand] play 999 " +
+                "sa_pick_pocket.ogg 0.000000 0 " +
+                "0.050000 1.000000 0.000000 -"
+              ),
+            ]
             """
         )
-        assert played
+        assert all(played), played
         page.wait_for_function(
             """
             () => {
               const value =
                 window.ToontownShortAudioBanks.diagnostics();
-              return value.plays >= 1 &&
+              return value.plays >= 2 &&
                 value.contextState === "running";
             }
             """,
@@ -176,9 +187,14 @@ def main():
         )
         page.evaluate(
             """
-            () => window.ToontownShortAudioBanks.handleCommand(
-              "[BrowserWebAudioCommand] stop 999"
-            )
+            () => {
+              window.ToontownShortAudioBanks.handleCommand(
+                "[BrowserWebAudioCommand] stop 998"
+              );
+              window.ToontownShortAudioBanks.handleCommand(
+                "[BrowserWebAudioCommand] stop 999"
+              );
+            }
             """
         )
         page.wait_for_function(
@@ -201,10 +217,11 @@ def main():
             for event in lifecycle["history"]
         ), lifecycle
         assert diagnostics["bankFailures"] == 0, diagnostics
-        assert diagnostics["decodedSounds"] == 10, diagnostics
+        assert diagnostics["decodedSounds"] == 47, diagnostics
         assert diagnostics["banks"]["tutorial-battle"]["state"] == "ready"
+        assert diagnostics["banks"]["cog-attacks"]["state"] == "ready"
         if not BOOTSTRAP_SESSION:
-            assert bank_responses, bank_responses
+            assert len(bank_responses) == 2, bank_responses
         assert all(
             status == 200 for _url, status in bank_responses
         ), bank_responses
@@ -224,8 +241,12 @@ def main():
     print(
         "Short-audio browser smoke passed: "
         f"browser={BROWSER_NAME} "
-        f"fetch={diagnostics['banks']['tutorial-battle']['fetchMs']}ms "
-        f"decode={diagnostics['banks']['tutorial-battle']['decodeMs']}ms"
+        "tutorial="
+        f"{diagnostics['banks']['tutorial-battle']['fetchMs']}ms/"
+        f"{diagnostics['banks']['tutorial-battle']['decodeMs']}ms "
+        "cog-attacks="
+        f"{diagnostics['banks']['cog-attacks']['fetchMs']}ms/"
+        f"{diagnostics['banks']['cog-attacks']['decodeMs']}ms"
     )
 
 
