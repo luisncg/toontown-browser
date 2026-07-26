@@ -431,6 +431,7 @@ footer {
 }
 
 .keys { text-align: center; }
+.keys a { color: inherit; }
 
 .mobile-controls {
   display: none;
