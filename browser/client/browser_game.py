@@ -29,8 +29,10 @@ DEFAULT_BROWSER_GAME_SERVER = "ws://127.0.0.1:7200/astron"
 BROWSER_GAME_SERVER_STORAGE_KEY = "open-toontown.game-server"
 _BROWSER_RESUME_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{32,128}$')
 _BROWSER_GATEWAY_LEASE_RE = re.compile(
-    r'^v1(?:\.[A-Za-z0-9_-]+){3}$')
+    r'^v2(?:\.[A-Za-z0-9_-]+){3}$')
 _BROWSER_AUTHORITY_RE = re.compile(r'^[a-f0-9]{32}$')
+_BROWSER_BUILD_RE = re.compile(r'^[a-f0-9]{64}$')
+_BROWSER_OFFICIAL_BUILD_RE = re.compile(r'^[a-f0-9]{32}$')
 
 
 def _get_browser_game_server():
@@ -69,15 +71,20 @@ def _get_browser_game_server():
     resume_values = query.get('resume', ())
     lease_values = query.get('lease', ())
     authority_values = query.get('authority', ())
+    build_values = query.get('build', ())
+    official_build_values = query.get('attestation', ())
     query_names = set(query)
     allowed_query_names = (
         (
             {'resume'},
-            {'resume', 'lease'},
-            {'resume', 'lease', 'authority'},
+            {
+                'resume', 'lease', 'authority', 'build', 'attestation',
+            },
         )
         if LOCAL_ASTRON_DEVELOPMENT
-        else ({'resume', 'lease', 'authority'},)
+        else ({
+            'resume', 'lease', 'authority', 'build', 'attestation',
+        },)
     )
     if (
         parsed.scheme not in ('ws', 'wss')
@@ -100,6 +107,19 @@ def _get_browser_game_server():
                 len(authority_values) != 1
                 or not _BROWSER_AUTHORITY_RE.fullmatch(
                     authority_values[0])
+            )
+        )
+        or (
+            'build' in query_names and (
+                len(build_values) != 1
+                or not _BROWSER_BUILD_RE.fullmatch(build_values[0])
+            )
+        )
+        or (
+            'attestation' in query_names and (
+                len(official_build_values) != 1
+                or not _BROWSER_OFFICIAL_BUILD_RE.fullmatch(
+                    official_build_values[0])
             )
         )
         or parsed.fragment

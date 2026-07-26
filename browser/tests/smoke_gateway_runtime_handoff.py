@@ -107,11 +107,13 @@ expected_gateway = (
 assert result["runtime_gateway_origin"] == f"{expected_gateway}/astron"
 assert result["runtime_gateway_parameters"] in (
     ["resume"],
-    ["authority", "lease", "resume"],
+    ["attestation", "authority", "build", "lease", "resume"],
 )
 if game_origin.hostname not in {"127.0.0.1", "localhost", "::1"}:
     assert result["runtime_gateway_parameters"] == [
+        "attestation",
         "authority",
+        "build",
         "lease",
         "resume",
     ]
