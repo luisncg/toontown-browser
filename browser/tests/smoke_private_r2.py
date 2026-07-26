@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from collections import Counter
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
@@ -12,6 +13,21 @@ READY_TIMEOUT_MS = int(os.environ.get("TOONTOWN_READY_TIMEOUT_MS", "180000"))
 EDGE_IP = os.environ.get("TOONTOWN_EDGE_IP", "")
 if not SESSION:
     raise SystemExit("TOONTOWN_BOOTSTRAP_SESSION is required")
+
+
+def gateway_status_summary(responses):
+    return {
+        "counts": dict(Counter(item["status"] for item in responses)),
+        "non200": [
+            {
+                "status": item["status"],
+                "budgetScope": item["budgetScope"],
+                "ticketLength": item["ticketLength"],
+            }
+            for item in responses
+            if item["status"] != 200
+        ],
+    }
 
 
 with sync_playwright() as playwright:
@@ -167,14 +183,6 @@ with sync_playwright() as playwright:
     assert not cold_direct_r2, "the browser must never receive a direct R2 URL"
     assert cold_ticket_batches == [200], "cold boot must use one ticket batch"
     assert cold_gateway, "cold startup did not use the private Worker gateway"
-    assert all(item["status"] == 200 for item in cold_gateway), cold_gateway
-    assert all(item["cache"] == "private, no-store" for item in cold_gateway)
-    assert all(item["encoding"] == "gzip" for item in cold_gateway)
-    assert all(item["disposition"].startswith("inline; filename=\"") for item in cold_gateway)
-    assert all(
-        not item["leakedAssetName"]
-        for item in cold_gateway
-    ), "opaque Worker tickets leaked asset names or release identifiers"
     assert not cold_origin_heavy, (
         "batched cold boot unexpectedly made per-asset origin requests"
     )
@@ -184,14 +192,34 @@ with sync_playwright() as playwright:
         "window.ToontownAssetLoader.diagnostics()['4']"
     )
     assert cold_phase_4_before["state"] in {"loading", "ready"}
-    cold_mount_ms = cold_page.evaluate(
-        """async () => {
-            const startedAt = performance.now();
-            await window.ToontownAssetLoader.requestPhase('4');
-            return performance.now() - startedAt;
-        }"""
-    )
+    try:
+        cold_mount_ms = cold_page.evaluate(
+            """async () => {
+                const startedAt = performance.now();
+                await window.ToontownAssetLoader.requestPhase('4');
+                return performance.now() - startedAt;
+            }"""
+        )
+    except Exception:
+        print(
+            "Cold Phase 4 gateway diagnostics: "
+            f"{gateway_status_summary(cold_gateway)}"
+        )
+        raise
     cold_page.wait_for_timeout(100)
+    assert all(item["status"] == 200 for item in cold_gateway), (
+        gateway_status_summary(cold_gateway)
+    )
+    assert all(item["cache"] == "private, no-store" for item in cold_gateway)
+    assert all(item["encoding"] == "gzip" for item in cold_gateway)
+    assert all(
+        item["disposition"].startswith("inline; filename=\"")
+        for item in cold_gateway
+    )
+    assert all(
+        not item["leakedAssetName"]
+        for item in cold_gateway
+    ), "opaque Worker tickets leaked asset names or release identifiers"
     cold_phase_4 = cold_page.evaluate(
         "window.ToontownAssetLoader.diagnostics()['4']"
     )

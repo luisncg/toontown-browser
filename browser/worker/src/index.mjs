@@ -225,14 +225,17 @@ function guardedBody(body, release) {
       try {
         const value = await reader.read();
         if (value.done) {
-          controller.close();
+          // Release the Durable Object reservations before exposing EOF to the
+          // browser. Otherwise the next bounded package request can race the
+          // asynchronous release and receive a false concurrency 429.
           await finish();
+          controller.close();
           return;
         }
         controller.enqueue(value.value);
       } catch (error) {
-        controller.error(error);
         await finish();
+        controller.error(error);
       }
     },
     async cancel(reason) {
