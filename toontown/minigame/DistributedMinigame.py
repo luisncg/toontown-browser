@@ -113,7 +113,13 @@ class DistributedMinigame(DistributedObject.DistributedObject):
             self.offstage()
             base.cr.renderFrame()
             if self.normalExit:
-                self.sendUpdate('setAvatarExited', [])
+                from toontown.authority.BrowserAuthorityManager import (
+                    requestTransition,
+                )
+                requestTransition(
+                    'minigame.finish',
+                    {'game': self.doId},
+                    lambda: self.sendUpdate('setAvatarExited', []))
 
         self.cleanupActions.append(cleanup)
         self._telemLimiter = self.getTelemetryLimiter()

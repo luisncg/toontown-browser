@@ -184,6 +184,17 @@ class DistributedElevatorAI(DistributedObjectAI.DistributedObjectAI):
                 self.rejectingBoardersHandler(*newArgs)
                 return
             if boardResponse == 0:
+                from toontown.authority.ServerActionGuardsAI import (
+                    doorPosition, requireInteraction)
+                position = doorPosition(self.air, self.bldg)
+                if not requireInteraction(
+                        self.air, avId, av,
+                        targetPosition=position,
+                        maximum=55.0,
+                        action='building.board',
+                        requirePosition=True):
+                    self.rejectingBoardersHandler(*newArgs)
+                    return
                 from toontown.authority.BrowserAuthorityManagerAI import (
                     consumeProtectedTransition)
                 if not consumeProtectedTransition(

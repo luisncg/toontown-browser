@@ -47,6 +47,8 @@ class DistributedNPCSpecialQuestGiverAI(DistributedNPCToonBaseAI):
 
     def avatarEnter(self):
         avId = self.air.getAvatarIdFromSender()
+        if not self.canAvatarInteract(avId):
+            return
         self.notify.debug('avatar enter ' + str(avId))
         self.air.questManager.requestInteract(avId, self)
         DistributedNPCToonBaseAI.avatarEnter(self)

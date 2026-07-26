@@ -15,6 +15,14 @@ from toontown.toonbase import ToontownAccessAI
 
 class DistributedTrolleyAI(DistributedObjectAI.DistributedObjectAI):
     notify = DirectNotifyGlobal.directNotify.newCategory('DistributedTrolleyAI')
+    TROLLEY_POSITIONS = {
+        1000: (-25.0, -90.0, 5.67),
+        2000: (-120.945, -77.5626, 0.525),
+        3000: (52.5, 55.8, 6.15),
+        4000: (-54.0463, 55.8937, 6.5),
+        5000: (8.37, 222.32, 10.0),
+        9000: (64.0, -105.2, 0.0),
+    }
 
     def __init__(self, air):
         DistributedObjectAI.DistributedObjectAI.__init__(self, air)
@@ -162,6 +170,18 @@ class DistributedTrolleyAI(DistributedObjectAI.DistributedObjectAI):
                 self.rejectingBoardersHandler(*newArgs)
                 return
             if av.hp > 0 and self.accepting:
+                from toontown.authority.ServerActionGuardsAI import (
+                    requireInteraction)
+                position = self.TROLLEY_POSITIONS.get(
+                    int(self.zoneId) - int(self.zoneId) % 1000)
+                if not requireInteraction(
+                        self.air, avId, av,
+                        targetPosition=position,
+                        maximum=65.0,
+                        action='trolley.board',
+                        requirePosition=True):
+                    self.rejectingBoardersHandler(*newArgs)
+                    return
                 from toontown.authority.BrowserAuthorityManagerAI import (
                     consumeProtectedTransition)
                 if not consumeProtectedTransition(

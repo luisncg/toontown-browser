@@ -7,6 +7,7 @@ import unittest
 
 from toontown.authority.BrowserCapabilityTokensAI import (
     advance_state,
+    normalize_target,
     verify_state,
     verify_transition,
 )
@@ -100,6 +101,29 @@ class GameAuthorityPythonTests(unittest.TestCase):
             secret=secret,
             release=self.release,
             now=self.now_ms // 1000))
+
+    def test_new_protected_action_targets_are_strictly_normalized(self):
+        self.assertEqual(
+            normalize_target(
+                'npc.interact', {'npc': 41, 'zone': 2000}),
+            {'npc': 41, 'zone': 2000})
+        self.assertEqual(
+            normalize_target(
+                'catalog.purchase',
+                {'phone': 51, 'context': 7, 'gift': 1}),
+            {'phone': 51, 'context': 7, 'gift': 1})
+        self.assertEqual(
+            normalize_target(
+                'boss.reward', {'boss': 61, 'reward': 3}),
+            {'boss': 61, 'reward': 3})
+        self.assertEqual(
+            normalize_target('minigame.finish', {'game': 71}),
+            {'game': 71})
+        self.assertEqual(
+            normalize_target('race.finish', {'race': 81, 'laps': 3}),
+            {'race': 81, 'laps': 3})
+        with self.assertRaises(ValueError):
+            normalize_target('race.finish', {'race': 81, 'laps': 0})
 
 
 if __name__ == '__main__':

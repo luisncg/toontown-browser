@@ -49,7 +49,7 @@ class DistributedNPCClerk(DistributedNPCToonBase):
     def handleCollisionSphereEnter(self, collEntry):
         if self.allowedToEnter():
             base.cr.playGame.getPlace().fsm.request('purchase')
-            self.sendUpdate('avatarEnter', [])
+            self.requestAvatarEnter()
         else:
             place = base.cr.playGame.getPlace()
             if place:

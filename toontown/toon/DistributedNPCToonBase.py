@@ -92,6 +92,16 @@ class DistributedNPCToonBase(DistributedToon.DistributedToon):
     def getCollSphereRadius(self):
         return 3.25
 
+    def requestAvatarEnter(self):
+        from toontown.authority.BrowserAuthorityManager import (
+            requestTransition,
+        )
+        zoneId = getattr(self, 'zoneId', 0)
+        requestTransition(
+            'npc.interact',
+            {'npc': self.doId, 'zone': zoneId},
+            lambda: self.sendUpdate('avatarEnter', []))
+
     def __initCollisions(self):
         self.cSphere = CollisionTube(0.0, 1.0, 0.0, 0.0, 1.0, 5.0, self.getCollSphereRadius())
         self.cSphere.setTangible(0)

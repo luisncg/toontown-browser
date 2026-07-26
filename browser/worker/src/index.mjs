@@ -2,6 +2,13 @@ import { openAssetTicket } from "../../shared/asset-ticket.mjs";
 
 const MAX_SESSION_AGE_SECONDS = 6 * 60 * 60;
 const MAX_TICKET_FUTURE_SECONDS = 5 * 60;
+const BUDGET_WINDOW_MILLISECONDS = 15 * 60 * 1_000;
+const RESERVATION_TTL_MILLISECONDS = 5 * 60 * 1_000;
+const SESSION_BYTE_BUDGET = 768 * 1024 * 1024;
+const IP_BYTE_BUDGET = 4 * 1024 * 1024 * 1024;
+const SESSION_CONCURRENCY = 6;
+const IP_CONCURRENCY = 18;
+const MAX_TICKET_USES = 3;
 const OBJECT_KEY = /^releases\/([a-f0-9]{64})\/([A-Za-z0-9._-]+)$/;
 const ASSET_NAME = /^(?:open-toontown\.(?:data|wasm)|phase-[a-z0-9.-]+\.data|audio-bank-[a-z0-9.-]+\.data)$/;
 
@@ -10,6 +17,17 @@ function text(status, body) {
     status,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
+function json(status, value) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
     },
@@ -75,6 +93,14 @@ async function sessionDigest(value) {
   return hex(new Uint8Array(digest)).slice(0, 32);
 }
 
+async function digestText(value) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return hex(new Uint8Array(digest));
+}
+
 function validTicket(ticket, request, session, nowSeconds) {
   if (!ticket || ![1, 2].includes(ticket.version)) return false;
   if (
@@ -105,12 +131,110 @@ function validTicket(ticket, request, session, nowSeconds) {
     return false;
   }
   if (!["identity", "gzip"].includes(ticket.contentEncoding)) return false;
+  if (
+    !Number.isSafeInteger(ticket.expectedBytes) ||
+    ticket.expectedBytes < 1 ||
+    ticket.expectedBytes > 768 * 1024 * 1024
+  ) {
+    return false;
+  }
   const match = typeof ticket.objectKey === "string"
     ? ticket.objectKey.match(OBJECT_KEY)
     : undefined;
   if (!match) return false;
   const expectedObject = `${ticket.name}${ticket.contentEncoding === "gzip" ? ".gz" : ""}`;
   return match[2] === expectedObject;
+}
+
+async function budgetRequest(namespace, name, payload) {
+  if (!namespace) throw new Error("Asset budget binding is unavailable");
+  const id = namespace.idFromName(name);
+  return namespace.get(id).fetch("https://asset-budget.internal/reserve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function releaseBudget(namespace, name, reservation) {
+  if (!reservation) return;
+  try {
+    const id = namespace.idFromName(name);
+    await namespace.get(id).fetch("https://asset-budget.internal/release", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reservation }),
+    });
+  } catch {
+    // Reservations also expire. A failed release cannot expand byte budgets.
+  }
+}
+
+async function reserveAsset(environment, session, ipDigest, ticketDigest, bytes) {
+  const sessionName = `session:${session}`;
+  const ipName = `ip:${ipDigest}`;
+  const sessionResponse = await budgetRequest(
+    environment.ASSET_BUDGETS,
+    sessionName,
+    { scope: "session", ticket: ticketDigest, bytes },
+  );
+  if (!sessionResponse.ok) return { response: sessionResponse };
+  const sessionValue = await sessionResponse.json();
+  const ipResponse = await budgetRequest(
+    environment.ASSET_BUDGETS,
+    ipName,
+    { scope: "ip", bytes },
+  );
+  if (!ipResponse.ok) {
+    await releaseBudget(
+      environment.ASSET_BUDGETS,
+      sessionName,
+      sessionValue.reservation,
+    );
+    return { response: ipResponse };
+  }
+  const ipValue = await ipResponse.json();
+  return {
+    sessionName,
+    sessionReservation: sessionValue.reservation,
+    ipName,
+    ipReservation: ipValue.reservation,
+  };
+}
+
+function guardedBody(body, release) {
+  const source = new Response(body).body;
+  if (!source) return null;
+  const reader = source.getReader();
+  let released = false;
+  const finish = async () => {
+    if (released) return;
+    released = true;
+    await release();
+  };
+  return new ReadableStream({
+    async pull(controller) {
+      try {
+        const value = await reader.read();
+        if (value.done) {
+          controller.close();
+          await finish();
+          return;
+        }
+        controller.enqueue(value.value);
+      } catch (error) {
+        controller.error(error);
+        await finish();
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        await finish();
+      }
+    },
+  });
 }
 
 export default {
@@ -150,10 +274,54 @@ export default {
       return text(403, "Invalid asset ticket");
     }
 
+    let reservation;
+    if (request.method === "GET") {
+      const clientIp = request.headers.get("cf-connecting-ip") || "";
+      if (!clientIp || clientIp.length > 64) {
+        return text(403, "Client identity unavailable");
+      }
+      reservation = await reserveAsset(
+        environment,
+        session,
+        await digestText(clientIp),
+        await digestText(match[1]),
+        ticket.expectedBytes,
+      );
+      if (reservation.response) {
+        return new Response(reservation.response.body, {
+          status: reservation.response.status,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "private, no-store",
+            "Retry-After": "60",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      }
+    }
+
     const object = request.method === "HEAD"
       ? await environment.ASSETS.head(ticket.objectKey)
       : await environment.ASSETS.get(ticket.objectKey);
-    if (!object) return text(404, "Asset not found");
+    if (!object || object.size !== ticket.expectedBytes) {
+      if (reservation) {
+        await Promise.all([
+          releaseBudget(
+            environment.ASSET_BUDGETS,
+            reservation.sessionName,
+            reservation.sessionReservation,
+          ),
+          releaseBudget(
+            environment.ASSET_BUDGETS,
+            reservation.ipName,
+            reservation.ipReservation,
+          ),
+        ]);
+      }
+      return text(object ? 409 : 404, object
+        ? "Asset metadata mismatch"
+        : "Asset not found");
+    }
 
     const headers = new Headers();
     object.writeHttpMetadata?.(headers);
@@ -169,7 +337,23 @@ export default {
     headers.set("Cross-Origin-Resource-Policy", "same-origin");
     headers.set("X-Content-Type-Options", "nosniff");
     if (object.httpEtag) headers.set("ETag", object.httpEtag);
-    return new Response(request.method === "HEAD" ? null : object.body, {
+    const release = reservation
+      ? () => Promise.all([
+        releaseBudget(
+          environment.ASSET_BUDGETS,
+          reservation.sessionName,
+          reservation.sessionReservation,
+        ),
+        releaseBudget(
+          environment.ASSET_BUDGETS,
+          reservation.ipName,
+          reservation.ipReservation,
+        ),
+      ])
+      : async () => {};
+    return new Response(
+      request.method === "HEAD" ? null : guardedBody(object.body, release),
+      {
       status: 200,
       headers,
       // R2 stores the .gz representation exactly as uploaded. Cloudflare's
@@ -177,6 +361,92 @@ export default {
       // time, leaving browsers with a still-compressed WASM/data payload after
       // their normal Content-Encoding decode.
       encodeBody: ticket.contentEncoding === "gzip" ? "manual" : "automatic",
-    });
+      },
+    );
   },
 };
+
+export class AssetBudget {
+  constructor(state) {
+    this.state = state;
+  }
+
+  async fetch(request) {
+    if (request.method !== "POST") return text(405, "Method not allowed");
+    const url = new URL(request.url);
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid-request" });
+    }
+    const now = Date.now();
+    const value = await this.state.storage.get("budget") || {
+      windowStarted: now,
+      bytes: 0,
+      active: 0,
+      ticketUses: {},
+      reservations: {},
+    };
+    for (const [id, entry] of Object.entries(value.reservations)) {
+      if (!entry || entry.expiresAt <= now) {
+        delete value.reservations[id];
+        value.active = Math.max(0, value.active - 1);
+      }
+    }
+    if (now - value.windowStarted >= BUDGET_WINDOW_MILLISECONDS) {
+      value.windowStarted = now;
+      value.bytes = 0;
+      value.ticketUses = {};
+    }
+    if (url.pathname === "/release") {
+      const reservation = value.reservations[body.reservation];
+      if (reservation) {
+        delete value.reservations[body.reservation];
+        value.active = Math.max(0, value.active - 1);
+        await this.state.storage.put("budget", value);
+      }
+      return json(200, { released: Boolean(reservation) });
+    }
+    if (url.pathname !== "/reserve") {
+      return json(404, { error: "not-found" });
+    }
+    const bytes = body.bytes;
+    if (!Number.isSafeInteger(bytes) || bytes < 1) {
+      return json(400, { error: "invalid-bytes" });
+    }
+    const sessionScope = body.scope === "session";
+    if (!sessionScope && body.scope !== "ip") {
+      return json(400, { error: "invalid-scope" });
+    }
+    const byteLimit = sessionScope ? SESSION_BYTE_BUDGET : IP_BYTE_BUDGET;
+    const concurrencyLimit = sessionScope
+      ? SESSION_CONCURRENCY
+      : IP_CONCURRENCY;
+    if (value.bytes + bytes > byteLimit || value.active >= concurrencyLimit) {
+      return json(429, { error: "asset-budget-exceeded" });
+    }
+    if (sessionScope) {
+      if (
+        typeof body.ticket !== "string" ||
+        !/^[a-f0-9]{64}$/.test(body.ticket)
+      ) {
+        return json(400, { error: "invalid-ticket" });
+      }
+      const uses = value.ticketUses[body.ticket] || 0;
+      if (uses >= MAX_TICKET_USES) {
+        return json(429, { error: "ticket-replay-limit" });
+      }
+      value.ticketUses[body.ticket] = uses + 1;
+    }
+    const reservation = crypto.randomUUID();
+    value.bytes += bytes;
+    value.active += 1;
+    value.reservations[reservation] = {
+      bytes,
+      expiresAt: now + RESERVATION_TTL_MILLISECONDS,
+    };
+    await this.state.storage.put("budget", value);
+    return json(200, { reservation });
+  }
+}

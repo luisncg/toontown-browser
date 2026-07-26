@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import os
 
@@ -12,6 +14,7 @@ from toontown.authority.BrowserCapabilityTokensAI import (
     verify_transition,
 )
 from toontown.authority.BrowserProgressionLedgerAI import (
+    BrowserAuthorityHeadStore,
     BrowserProgressionLedgerStore,
 )
 
@@ -35,6 +38,7 @@ class BrowserAuthorityManagerAI(DistributedObjectAI):
         self.sessionOwners = {}
         self.pending = {}
         self.recentReceipts = {}
+        self.authorityHeads = BrowserAuthorityHeadStore(self.secret)
         self.progressionLedger = BrowserProgressionLedgerStore(self.secret)
 
     def delete(self):
@@ -50,6 +54,18 @@ class BrowserAuthorityManagerAI(DistributedObjectAI):
         if not avId or state is None:
             self._reject(avId, 0, REJECT_INVALID_SESSION,
                          'invalid runtime registration')
+            return
+        try:
+            acceptedHead = self.authorityHeads.observe(state)
+        except Exception:
+            acceptedHead = False
+            self.notify.warning(
+                'Could not validate the durable authority head for avatar %s.'
+                % avId)
+        if not acceptedHead:
+            self._reject(
+                avId, 0, REJECT_STATE_MISMATCH,
+                'runtime registration attempted to rewind approved state')
             return
         previousOwner = self.sessionOwners.get(state['sid'])
         if (
@@ -123,18 +139,42 @@ class BrowserAuthorityManagerAI(DistributedObjectAI):
                     avId, 'mismatched capability for %s' % action)
                 return False
             return True
+        try:
+            if not self.authorityHeads.observe(state):
+                self.pending.pop(avId, None)
+                self._suspicious(
+                    avId, 'runtime state was below its durable high-water mark')
+                return False
+        except Exception:
+            self.pending.pop(avId, None)
+            self._suspicious(
+                avId, 'durable authority head validation failed')
+            return False
         self.pending.pop(avId, None)
         successor = advance_state(transition, self.secret)
         nextState = verify_state(successor['stateToken'], self.secret)
         if nextState is None:
             self._suspicious(avId, 'successor state verification failed')
             return False
+        receipt = successor['receipt']
+        sessionReceipts = self.recentReceipts.setdefault(
+            nextState['sid'], [])
+        if receipt['id'] in sessionReceipts:
+            self._suspicious(avId, 'transition receipt was replayed')
+            return False
+        try:
+            if not self.authorityHeads.observe(nextState):
+                self._suspicious(
+                    avId, 'successor did not advance durable authority head')
+                return False
+        except Exception:
+            self._suspicious(
+                avId, 'could not persist successor authority head')
+            return False
         self.states[avId] = nextState
         requestId = pending['requestId']
-        receipt = successor['receipt']
-        receipts = self.recentReceipts.setdefault(avId, [])
-        receipts.append(receipt)
-        del receipts[:-32]
+        sessionReceipts.append(receipt['id'])
+        del sessionReceipts[:-128]
         self.sendUpdateToAvatarId(
             avId,
             'transitionCommitted',
@@ -155,7 +195,19 @@ class BrowserAuthorityManagerAI(DistributedObjectAI):
     def recordProgressionMutation(self, avId, mutation, details=None):
         state = self.states.get(avId)
         if state is None:
-            return False
+            # Server-driven and offline mutations are not always adjacent to
+            # an active browser transition.  They still receive a stable,
+            # signed authority identity so they cannot bypass the ledger.
+            serverState = hashlib.sha256(
+                self.secret + (
+                    'server-approved-progression:%s' % int(avId)
+                ).encode('ascii')).digest()
+            state = {
+                'st': serverState[:16].hex(),
+                'sq': 0,
+                'm': base64.urlsafe_b64encode(
+                    serverState[16:]).rstrip(b'=').decode('ascii'),
+            }
         try:
             entry = self.progressionLedger.append(
                 avId, mutation, state, details=details)
@@ -190,11 +242,9 @@ class BrowserAuthorityManagerAI(DistributedObjectAI):
     def _dropAvatar(self, avId):
         state = self.states.pop(avId, None)
         self.pending.pop(avId, None)
-        self.recentReceipts.pop(avId, None)
-        if (
-                state is not None and
-                self.sessionOwners.get(state['sid']) == avId):
-            self.sessionOwners.pop(state['sid'], None)
+        # Keep the session owner/high-water mark after a Toon disconnects.
+        # The same browser session may select another owned Toon, but it may
+        # never register an older state token and recover spent capabilities.
 
     def _suspicious(self, avId, message):
         self.air.writeServerEvent(

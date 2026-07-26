@@ -269,16 +269,28 @@ class DistributedPhone(DistributedFurnitureItem.DistributedFurnitureItem):
     def requestPurchase(self, item, callback, optional = -1):
         blob = item.getBlob(store=CatalogItem.Customization)
         context = self.getCallbackContext(callback, [item])
-        self.sendUpdate('requestPurchaseMessage', [context, blob, optional])
+        from toontown.authority.BrowserAuthorityManager import (
+            requestTransition,
+        )
+        requestTransition(
+            'catalog.purchase',
+            {'phone': self.doId, 'context': context, 'gift': 0},
+            lambda: self.sendUpdate(
+                'requestPurchaseMessage', [context, blob, optional]))
 
     def requestGiftPurchase(self, item, targetDoID, callback, optional = -1):
         print('in the client phone')
         blob = item.getBlob(store=CatalogItem.Customization)
         context = self.getCallbackContext(callback, [item])
-        self.sendUpdate('requestGiftPurchaseMessage', [context,
-         targetDoID,
-         blob,
-         optional])
+        from toontown.authority.BrowserAuthorityManager import (
+            requestTransition,
+        )
+        requestTransition(
+            'catalog.purchase',
+            {'phone': self.doId, 'context': context, 'gift': 1},
+            lambda: self.sendUpdate(
+                'requestGiftPurchaseMessage',
+                [context, targetDoID, blob, optional]))
 
     def requestPurchaseResponse(self, context, retcode):
         self.doCallbackContext(context, [retcode])

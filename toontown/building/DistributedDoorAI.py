@@ -112,12 +112,24 @@ class DistributedDoorAI(DistributedObjectAI.DistributedObjectAI):
 
     def requestEnter(self):
         avatarID = self.air.getAvatarIdFromSender()
+        avatar = self.air.doId2do.get(avatarID)
         lockedVal = self.isLockedDoor()
         if not ToontownAccessAI.canAccess(avatarID, self.zoneId, 'DistributedDoorAI.requestEnter'):
             lockedVal = True
         if lockedVal:
             self.sendReject(avatarID, lockedVal)
         else:
+            from toontown.authority.ServerActionGuardsAI import (
+                doorPosition, requireInteraction)
+            position = doorPosition(self.air, self)
+            if not requireInteraction(
+                    self.air, avatarID, avatar,
+                    targetPosition=position,
+                    maximum=45.0,
+                    action='door.enter',
+                    requirePosition=True):
+                self.sendReject(avatarID, True)
+                return
             from toontown.authority.BrowserAuthorityManagerAI import (
                 consumeProtectedTransition)
             if not consumeProtectedTransition(

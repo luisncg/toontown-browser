@@ -47,6 +47,24 @@ class DistributedNPCToonBaseAI(DistributedToonAI.DistributedToonAI):
     def avatarEnter(self):
         pass
 
+    def canAvatarInteract(self, avId):
+        avatar = self.air.doId2do.get(avId)
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition,
+        )
+        if not consumeProtectedTransition(
+                self.air, avId, 'npc.interact',
+                {'npc': self.doId, 'zone': self.zoneId}):
+            self.freeAvatar(avId)
+            return False
+        from toontown.authority.ServerActionGuardsAI import requireInteraction
+        allowed = requireInteraction(
+            self.air, avId, avatar, target=self,
+            maximum=42.0, action='npc.interact')
+        if not allowed:
+            self.freeAvatar(avId)
+        return allowed
+
     def isBusy(self):
         return self.busy > 0
 

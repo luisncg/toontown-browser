@@ -31,6 +31,8 @@ class DistributedNPCTailorAI(DistributedNPCToonBaseAI):
 
     def avatarEnter(self):
         avId = self.air.getAvatarIdFromSender()
+        if not self.canAvatarInteract(avId):
+            return
         if avId not in self.air.doId2do:
             self.notify.warning('Avatar: %s not found' % avId)
             return

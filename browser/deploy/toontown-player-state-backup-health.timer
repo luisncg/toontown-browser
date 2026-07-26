@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor Toontown Browser player-state backup freshness
+
+[Timer]
+OnBootSec=15m
+OnUnitActiveSec=6h
+Persistent=true
+Unit=toontown-player-state-backup-health.service
+
+[Install]
+WantedBy=timers.target

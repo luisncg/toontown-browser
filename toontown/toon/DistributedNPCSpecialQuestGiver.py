@@ -107,7 +107,7 @@ class DistributedNPCSpecialQuestGiver(DistributedNPCToonBase):
     def handleCollisionSphereEnter(self, collEntry):
         if self.allowedToTalk():
             base.cr.playGame.getPlace().fsm.request('quest', [self])
-            self.sendUpdate('avatarEnter', [])
+            self.requestAvatarEnter()
             self.nametag3d.setDepthTest(0)
             self.nametag3d.setBin('fixed', 0)
         else:

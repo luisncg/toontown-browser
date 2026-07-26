@@ -23,6 +23,8 @@ class DistributedNPCBlockerAI(DistributedNPCToonBaseAI):
 
     def avatarEnter(self):
         avId = self.air.getAvatarIdFromSender()
+        if not self.canAvatarInteract(avId):
+            return
         DistributedNPCToonBaseAI.avatarEnter(self)
         av = self.air.doId2do.get(avId)
         if av is None:

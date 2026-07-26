@@ -91,6 +91,7 @@ class DistributedRace(DistributedObject.DistributedObject):
         self.oldT = 0
         self.debugIt = 0
         self.startPos = None
+        self._finishCapabilityPending = False
         return
 
     def generate(self):
@@ -570,11 +571,16 @@ class DistributedRace(DistributedObject.DistributedObject):
         now = globalClock.getFrameTime()
         timestamp = globalClockDelta.localToNetworkTime(now)
         if self.laps == self.lapCount:
-            self.sendUpdate('heresMyT', [localAvatar.doId,
-             self.laps,
-             self.currLapT,
-             timestamp])
-            self.fsm.request('finished')
+            if not self._finishCapabilityPending:
+                self._finishCapabilityPending = True
+                from toontown.authority.BrowserAuthorityManager import (
+                    requestTransition,
+                )
+                requestTransition(
+                    'race.finish',
+                    {'race': self.doId, 'laps': self.lapCount},
+                    lambda: self._submitAuthoritativeFinish(timestamp))
+            return Task.cont
         if self.laps > self.maxLap:
             self.maxLap = self.laps
             self.sendUpdate('heresMyT', [localAvatar.doId,
@@ -590,6 +596,15 @@ class DistributedRace(DistributedObject.DistributedObject):
         self.gui.updateRacerInfo(localAvatar.doId, curvetime=self.currLapT + self.laps)
         self.gui.update(now)
         return Task.cont
+
+    def _submitAuthoritativeFinish(self, timestamp):
+        self.sendUpdate('heresMyT', [
+            localAvatar.doId,
+            self.lapCount,
+            self.currLapT,
+            timestamp,
+        ])
+        self.fsm.request('finished')
 
     def enterFinished(self):
         taskMgr.remove('raceWatcher')

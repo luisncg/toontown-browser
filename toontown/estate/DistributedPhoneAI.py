@@ -54,6 +54,14 @@ class DistributedPhoneAI(DistributedFurnitureItemAI):
             self.furnitureManager.recordUnauthorized(avId, 'use phone')
             self.sendUpdateToAvatarId(avId, 'freeAvatar', [])
             return
+        from toontown.authority.ServerActionGuardsAI import requireInteraction
+        if not requireInteraction(
+                self.air, avId, avatar, target=self,
+                maximum=24.0, action='catalog.phone.enter'):
+            self.furnitureManager.recordUnauthorized(
+                avId, 'used catalog phone remotely')
+            self.sendUpdateToAvatarId(avId, 'freeAvatar', [])
+            return
         if self.busyAvatarId:
             self.sendUpdateToAvatarId(avId, 'freeAvatar', [])
             return
@@ -111,6 +119,9 @@ class DistributedPhoneAI(DistributedFurnitureItemAI):
         key = (avId, 'catalog-purchase', int(context))
         status, response = self._responses.lookup(key, fingerprint)
         if status == 'replay':
+            # A lost response may cause Astron/the browser transport to retry
+            # the already committed request.  Replaying the cached response is
+            # harmless and must not require a second spend capability.
             self.sendUpdateToAvatarId(
                 avId, 'requestPurchaseResponse', list(response))
             return
@@ -120,6 +131,13 @@ class DistributedPhoneAI(DistributedFurnitureItemAI):
             self._respondPurchase(
                 avId, context, ToontownGlobals.P_InvalidIndex,
                 key, fingerprint)
+            return
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition,
+        )
+        if not consumeProtectedTransition(
+                self.air, avId, 'catalog.purchase',
+                {'phone': self.doId, 'context': context, 'gift': 0}):
             return
         if (avId != self.busyAvatarId or self._purchaseInFlight):
             self._respondPurchase(
@@ -292,6 +310,13 @@ class DistributedPhoneAI(DistributedFurnitureItemAI):
 
     def requestGiftPurchaseMessage(self, context, targetId, blob, optional):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition,
+        )
+        if not consumeProtectedTransition(
+                self.air, avId, 'catalog.purchase',
+                {'phone': self.doId, 'context': context, 'gift': 1}):
+            return
         # Gifting spans two Toon records. It will be enabled with the delivery
         # recovery journal rather than risking a charge without a gift.
         self.sendUpdateToAvatarId(

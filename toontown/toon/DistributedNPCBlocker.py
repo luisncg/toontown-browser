@@ -36,7 +36,7 @@ class DistributedNPCBlocker(DistributedNPCToonBase):
 
     def handleCollisionSphereEnter(self, collEntry):
         base.cr.playGame.getPlace().fsm.request('quest', [self])
-        self.sendUpdate('avatarEnter', [])
+        self.requestAvatarEnter()
 
     def __handleUnexpectedExit(self):
         self.notify.warning('unexpected exit')

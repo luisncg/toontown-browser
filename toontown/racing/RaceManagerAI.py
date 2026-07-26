@@ -21,6 +21,13 @@ class RaceManagerAI(DirectObject.DirectObject):
     def getDoId(self):
         return 0
 
+    def _approveProgression(self, avId, mutation, details):
+        manager = getattr(self.air, 'browserAuthorityManager', None)
+        if manager is None:
+            return os.environ.get('TOONTOWN_PRODUCTION') != '1'
+        return manager.recordProgressionMutation(
+            avId, mutation, details)
+
     def createRace(self, trackId, raceType, laps, players, circuitLoop, circuitPoints, circuitTimes, qualTimes=[], circuitTimeList={}, circuitTotalBonusTickets={}):
         raceZone = self.air.allocateZone()
         race = DistributedRaceAI.DistributedRaceAI(self.air, trackId, raceZone, players, laps, raceType, self.exitedRace, self.raceOver, circuitLoop, circuitPoints, circuitTimes, qualTimes, circuitTimeList, circuitTotalBonusTickets)
@@ -61,6 +68,22 @@ class RaceManagerAI(DirectObject.DirectObject):
             race.circuitPoints[playerInfo.avId] = points
         currentTimeIndex = len(race.circuitTimeList[playerInfo.avId]) - 1
         if totalTime <= RaceGlobals.getQualifyingTime(race.trackId):
+            if not self._approveProgression(
+                    playerInfo.avId,
+                    'race.finish.approved',
+                    {
+                        'race': int(race.doId),
+                        'track': int(race.trackId),
+                        'serverTimeMs': int(totalTime * 1000.0),
+                        'place': int(place),
+                    }):
+                self.air.writeServerEvent(
+                    'suspicious', playerInfo.avId,
+                    'blocked unledgered race settlement')
+                race.d_setPlace(
+                    playerInfo.avId, totalTime, place,
+                    0, 0, 0, 0, [], points, circuitTime)
+                return
             race.circuitTimeList[playerInfo.avId][currentTimeIndex][1] = 1
             self.notify.debug('Racer Qualified time: %s required: %s' % (totalTime, RaceGlobals.getQualifyingTime(race.trackId)))
             qualify = 1
@@ -165,6 +188,19 @@ class RaceManagerAI(DirectObject.DirectObject):
                 self.notify.debug('isLastRace')
                 av = self.air.doId2do.get(avId)
                 if av and avId in race.playersFinished:
+                    if not self._approveProgression(
+                            avId,
+                            'race.circuit-finish.approved',
+                            {
+                                'race': int(race.doId),
+                                'track': int(race.trackId),
+                                'place': int(place),
+                                'racers': int(places),
+                            }):
+                        self.air.writeServerEvent(
+                            'suspicious', avId,
+                            'blocked unledgered circuit settlement')
+                        continue
                     self.air.writeServerEvent('kartingCircuitFinished', avId, '%s|%s' % (place, places))
                     print('kartingCircuitFinished', avId, '%s|%s' % (place, places))
                     entryFee = RaceGlobals.getEntryFee(race.trackId, race.raceType)

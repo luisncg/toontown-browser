@@ -26,6 +26,8 @@ class GameAuthorityLedgerTests(unittest.TestCase):
             1001, 'fishing.cast', self.state,
             details={'cost': 1}, now=10)
         self.assertEqual(first['previous'], GENESIS_HEAD)
+        self.assertEqual(first['sequence'], 0)
+        self.assertEqual(first['approvedSequence'], 4)
         self.state['sq'] = 5
         second = self.store.append(
             1001, 'fish-bingo.reward', self.state,
@@ -36,7 +38,9 @@ class GameAuthorityLedgerTests(unittest.TestCase):
         with open(headPath, 'r', encoding='utf8') as stream:
             head = json.load(stream)
         self.assertEqual(head['signature'], second['signature'])
-        self.assertEqual(head['sequence'], 5)
+        self.assertEqual(second['sequence'], 1)
+        self.assertEqual(second['approvedSequence'], 5)
+        self.assertEqual(head['sequence'], 1)
         self.assertEqual(
             os.stat(headPath).st_mode & 0o777, 0o600)
 

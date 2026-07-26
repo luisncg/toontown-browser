@@ -199,7 +199,10 @@ struct TalkModification {
 };
 
 dclass TalkPath_owner {
-  setTalk(uint32, uint32, string(0-256), string(0-400), TalkModification [], uint8) broadcast ownsend;
+  // Public chat must transit the AI server.  The sender-supplied identity is
+  // replaced there before the sanitized update is broadcast.
+  requestTalk(uint32, uint32, string(0-256), string(0-400), TalkModification [], uint8) clsend airecv;
+  setTalk(uint32, uint32, string(0-256), string(0-400), TalkModification [], uint8) broadcast;
 };
 
 dclass TalkPath_whisper {

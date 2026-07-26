@@ -5,6 +5,7 @@ from otp.otpbase.PythonUtil import nonRepeatingRandomList
 from toontown.racing import DistributedGagAI, DistributedProjectileAI
 from direct.task import Task
 import random
+import time
 from toontown.racing import Racer, RaceGlobals
 from direct.distributed.ClockDelta import *
 
@@ -22,6 +23,9 @@ class DistributedRaceAI(DistributedObjectAI.DistributedObjectAI):
         self.circuitPoints = circuitPoints
         self.circuitTimes = circuitTimes
         self.finishPending = []
+        self.raceStartedAt = None
+        self.lastAcceptedLap = {}
+        self.lastAcceptedLapAt = {}
         self.flushPendingTask = None
         self.kickSlowRacersTask = None
         for avId in avIds:
@@ -227,8 +231,11 @@ class DistributedRaceAI(DistributedObjectAI.DistributedObjectAI):
         self.ignoreBarrier(self.waitingForReadyBarrier)
         self.toonCount = len(self.avIds)
         self.baseTime = globalClock.getFrameTime() + 0.5 + RaceGlobals.RaceCountdown
+        self.raceStartedAt = time.monotonic() + 0.5 + RaceGlobals.RaceCountdown
         for i in self.racers:
             self.racers[i].baseTime = self.baseTime
+            self.lastAcceptedLap[i] = 0
+            self.lastAcceptedLapAt[i] = self.raceStartedAt
 
         self.sendUpdate('startRace', [globalClockDelta.localToNetworkTime(self.baseTime)])
         qualTime = RaceGlobals.getQualifyingTime(self.trackId)
@@ -384,10 +391,51 @@ class DistributedRaceAI(DistributedObjectAI.DistributedObjectAI):
         avId = self.air.getAvatarIdFromSender()
         if avId in self.racers and avId == inputAvId:
             me = self.racers[avId]
-            me.setLapT(numLaps, t, timestamp)
+            if self.raceStartedAt is None or me.finished or me.exited:
+                return
+            currentLap = self.lastAcceptedLap.get(avId, 0)
+            if numLaps == currentLap:
+                # Normal clients send same-lap presentation telemetry twice a
+                # second.  It is intentionally ignored for placement/rewards.
+                return
+            expectedLap = self.lastAcceptedLap.get(avId, 0) + 1
+            if numLaps != expectedLap or numLaps > self.lapCount:
+                self.air.writeServerEvent(
+                    'suspicious', avId,
+                    'race lap was skipped, repeated, or out of range: %s' %
+                    numLaps)
+                return
+            now = time.monotonic()
+            baseline = float(RaceGlobals.getDefaultRecordTime(self.trackId))
+            minimumLap = max(
+                3.0,
+                min(
+                    120.0,
+                    (baseline / max(1, self.lapCount)) * 0.45))
+            if now - self.lastAcceptedLapAt.get(
+                    avId, self.raceStartedAt) < minimumLap:
+                self.air.writeServerEvent(
+                    'suspicious', avId,
+                    'race lap arrived faster than the server minimum')
+                return
+            if numLaps == self.lapCount:
+                from toontown.authority.BrowserAuthorityManagerAI import (
+                    consumeProtectedTransition,
+                )
+                if not consumeProtectedTransition(
+                        self.air, avId, 'race.finish',
+                        {'race': self.doId, 'laps': self.lapCount}):
+                    return
+            self.lastAcceptedLap[avId] = numLaps
+            self.lastAcceptedLapAt[avId] = now
+            # Client timestamps and lap fractions are presentation hints only.
+            # Placement and rewards use the server's monotonic race clock.
+            me.maxLap = numLaps
+            me.lapT = float(numLaps)
+            me.totalTime = max(0.0, now - self.raceStartedAt)
             if me.maxLap == self.lapCount and not me.finished:
                 me.finished = True
-                taskMgr.remove('make %s invincible' % id)
+                taskMgr.remove('make %s invincible' % avId)
                 me.anvilTarget = True
                 someoneIsClose = False
                 for racer in list(self.racers.values()):

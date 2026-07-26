@@ -71,7 +71,7 @@ class DistributedNPCPartyPerson(DistributedNPCToonBase):
 
     def handleCollisionSphereEnter(self, collEntry):
         base.cr.playGame.getPlace().fsm.request('purchase')
-        self.sendUpdate('avatarEnter', [])
+        self.requestAvatarEnter()
 
     def __handleUnexpectedExit(self):
         self.notify.warning('unexpected exit')

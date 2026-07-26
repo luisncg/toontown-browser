@@ -73,10 +73,20 @@ class DistributedSellbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FS
 
     def hitBoss(self, bossDamage):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.sellbot.hit',
+                rate=2.0, burst=2.0):
+            return
         if not self.validate(avId, avId in self.involvedToons, 'DistributedSellbotBossAI.hitBoss from unknown avatar'):
             return
-        self.validate(avId, bossDamage == 1, 'invalid bossDamage %s' % bossDamage)
-        bossDamage = int(round(bossDamage * self.pieDamageMult))
+        from toontown.authority.ServerRewardRulesAI import fixedBossDamage
+        serverDamage = fixedBossDamage(bossDamage)
+        if not self.validate(
+                avId, serverDamage is not None,
+                'invalid bossDamage %s' % bossDamage):
+            return
+        bossDamage = int(round(serverDamage * self.pieDamageMult))
         if bossDamage < 1:
             return
         currState = self.getCurrentOrNextState()
@@ -93,6 +103,11 @@ class DistributedSellbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FS
 
     def hitBossInsides(self):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.sellbot.insides',
+                rate=1.0, burst=1.0):
+            return
         if not self.validate(avId, avId in self.involvedToons, 'hitBossInsides from unknown avatar'):
             return
         currState = self.getCurrentOrNextState()
@@ -103,6 +118,11 @@ class DistributedSellbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FS
 
     def hitToon(self, toonId):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.sellbot.toonup',
+                rate=1.5, burst=2.0):
+            return
         if not self.validate(avId, avId != toonId, 'hitToon on self'):
             return
         if avId not in self.involvedToons or toonId not in self.involvedToons:

@@ -624,7 +624,7 @@ class TalkAssistant(DirectObject.DirectObject):
             chatFlags = CFSpeech | CFTimeout
             if self.isThought(message):
                 chatFlags = CFThought
-            base.localAvatar.sendUpdate('setTalk', [0,
+            base.localAvatar.sendUpdate('requestTalk', [0,
              0,
              '',
              message,

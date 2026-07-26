@@ -1234,7 +1234,7 @@ class DistributedLawbotBoss(DistributedBossCog.DistributedBossCog, FSM.FSM):
             self.flashPanBlue()
             base.playSfx(self.evidenceHitSfx, node=self.defensePanNodePath, volume=0.25)
             if toon == localAvatar:
-                self.d_hitBoss(self.panDamage)
+                self.d_hitDefensePan()
         elif pieCode == ToontownGlobals.PieCodeProsecutionPan:
             self.flashGreen()
             if toon == localAvatar:

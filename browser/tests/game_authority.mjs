@@ -4,6 +4,7 @@ import {
   createGameSessionState,
   createSignedFeatureModule,
   createGameTransitionCapability,
+  normalizeGameTransitionTarget,
   verifyGameSessionState,
   verifyGameTransitionCapability,
   verifySignedFeatureModule,
@@ -73,6 +74,36 @@ assert.equal(nextState.st, transition.ns);
 assert.equal(nextState.sq, 1);
 assert.equal(advanced.receipt.action, "battle.attack");
 assert.equal(advanced.receipt.id.length, 64);
+
+assert.deepEqual(
+  normalizeGameTransitionTarget("npc.interact", { npc: 41, zone: 2000 }),
+  { npc: 41, zone: 2000 },
+);
+assert.deepEqual(
+  normalizeGameTransitionTarget("catalog.purchase", {
+    phone: 51,
+    context: 7,
+    gift: 1,
+  }),
+  { phone: 51, context: 7, gift: 1 },
+);
+assert.deepEqual(
+  normalizeGameTransitionTarget("boss.reward", { boss: 61, reward: 3 }),
+  { boss: 61, reward: 3 },
+);
+assert.deepEqual(
+  normalizeGameTransitionTarget("minigame.finish", { game: 71 }),
+  { game: 71 },
+);
+assert.deepEqual(
+  normalizeGameTransitionTarget("race.finish", { race: 81, laps: 3 }),
+  { race: 81, laps: 3 },
+);
+assert.throws(
+  () => normalizeGameTransitionTarget(
+    "race.finish", { race: 81, laps: 0 }),
+  /lap count/i,
+);
 
 const featureModule = createSignedFeatureModule({
   secret,

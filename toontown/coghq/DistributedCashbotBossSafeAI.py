@@ -2,6 +2,7 @@ from panda3d.core import *
 from toontown.toonbase import ToontownGlobals
 from otp.otpbase import OTPGlobals
 from . import DistributedCashbotBossObjectAI
+import math
 
 class DistributedCashbotBossSafeAI(DistributedCashbotBossObjectAI.DistributedCashbotBossObjectAI):
     wantsWatchDrift = 0
@@ -24,27 +25,44 @@ class DistributedCashbotBossSafeAI(DistributedCashbotBossObjectAI.DistributedCas
 
     def hitBoss(self, impact):
         avId = self.air.getAvatarIdFromSender()
-        self.validate(avId, impact <= 1.0, 'invalid hitBoss impact %s' % impact)
-        if avId not in self.boss.involvedToons:
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        try:
+            validImpact = math.isfinite(float(impact)) and 0.0 <= impact <= 1.0
+        except (TypeError, ValueError):
+            validImpact = False
+        if (
+                not validImpact or
+                not allowAction(
+                    self.air, avId, 'boss.cashbot.safe.hit',
+                    rate=0.75, burst=1.0) or
+                avId not in self.boss.involvedToons or
+                avId != self.avId):
             return
-        if self.state != 'Dropped' and self.state != 'Grabbed':
+        if self.state != 'Dropped':
             return
         if self.avoidHelmet or self == self.boss.heldObject:
             return
+        if self.getPos(self.boss).length() > 50.0:
+            self.air.writeServerEvent(
+                'suspicious', avId,
+                'Cashbot safe claimed a remote boss collision')
+            return
         if self.boss.heldObject == None:
             if self.boss.attackCode == ToontownGlobals.BossCogDizzy:
-                damage = int(impact * 50)
-                self.boss.recordHit(max(damage, 2))
+                # Client physics chooses only when to report the collision.
+                # Damage is a fixed server rule, never client momentum.
+                from toontown.authority.ServerRewardRulesAI import (
+                    cashbotSafeDamage)
+                self.boss.recordHit(cashbotSafeDamage())
             elif self.boss.acceptHelmetFrom(avId):
                 self.demand('Grabbed', self.boss.doId, self.boss.doId)
                 self.boss.heldObject = self
         else:
-            if impact >= ToontownGlobals.CashbotBossSafeKnockImpact:
-                self.boss.heldObject.demand('Dropped', avId, self.boss.doId)
-                self.boss.heldObject.avoidHelmet = 1
-                self.boss.heldObject = None
-                self.avoidHelmet = 1
-                self.boss.waitForNextHelmet()
+            self.boss.heldObject.demand('Dropped', avId, self.boss.doId)
+            self.boss.heldObject.avoidHelmet = 1
+            self.boss.heldObject = None
+            self.avoidHelmet = 1
+            self.boss.waitForNextHelmet()
         return
 
     def requestInitial(self):

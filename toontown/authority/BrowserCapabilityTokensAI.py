@@ -11,7 +11,7 @@ import time
 GAME_AUTHORITY_PROTOCOL = 1
 GAME_CONTENT_EPOCH = 'gameplay-v1'
 GAME_STATE_TTL_SECONDS = 6 * 60 * 60
-GAME_TRANSITION_TTL_SECONDS = 2 * 60
+GAME_TRANSITION_TTL_SECONDS = 45
 
 _STATE_PREFIX = 'gs1'
 _TRANSITION_PREFIX = 'gt1'
@@ -29,6 +29,11 @@ _ACTIONS = frozenset((
     'fish-bingo.claim',
     'mega.join',
     'mega.vote',
+    'npc.interact',
+    'catalog.purchase',
+    'boss.reward',
+    'minigame.finish',
+    'race.finish',
     'trolley.board',
 ))
 
@@ -162,6 +167,31 @@ def normalize_target(action, target):
         return {
             'elevator': _integer(target.get('elevator'), 1, 0xffffffff),
             'zone': _integer(target.get('zone'), 1, 0xffffffff),
+        }
+    if action == 'npc.interact':
+        return {
+            'npc': _integer(target.get('npc'), 1, 0xffffffff),
+            'zone': _integer(target.get('zone'), 1, 0xffffffff),
+        }
+    if action == 'catalog.purchase':
+        return {
+            'phone': _integer(target.get('phone'), 1, 0xffffffff),
+            'context': _integer(target.get('context'), 0, 0xffffffff),
+            'gift': _integer(target.get('gift'), 0, 1),
+        }
+    if action == 'boss.reward':
+        return {
+            'boss': _integer(target.get('boss'), 1, 0xffffffff),
+            'reward': _integer(target.get('reward'), 0, 0xffffffff),
+        }
+    if action == 'minigame.finish':
+        return {
+            'game': _integer(target.get('game'), 1, 0xffffffff),
+        }
+    if action == 'race.finish':
+        return {
+            'race': _integer(target.get('race'), 1, 0xffffffff),
+            'laps': _integer(target.get('laps'), 1, 0x7f),
         }
     return {
         'elevator': _integer(target.get('elevator'), 1, 0xffffffff),

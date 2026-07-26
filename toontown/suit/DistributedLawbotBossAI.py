@@ -79,20 +79,22 @@ class DistributedLawbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FSM
 
     def hitBoss(self, bossDamage):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.lawbot.hit',
+                rate=2.0, burst=2.0):
+            return
         if not self.validate(avId, avId in self.involvedToons, 'DistributedLawbotbossAI.hitBoss from unknown avatar'):
             return
-        self.validate(avId, bossDamage == 1, 'invalid bossDamage %s' % bossDamage)
-        if bossDamage < 1:
+        from toontown.authority.ServerRewardRulesAI import fixedBossDamage
+        bossDamage = fixedBossDamage(bossDamage)
+        if not self.validate(
+                avId, bossDamage is not None,
+                'invalid bossDamage claim'):
             return
         currState = self.getCurrentOrNextState()
         if currState != 'BattleThree':
             return
-        if bossDamage <= 12:
-            newWeight = self.weightPerToon.get(avId)
-            if newWeight:
-                bossDamage = newWeight
-        if self.bonusState and bossDamage <= 12:
-            bossDamage *= ToontownGlobals.LawbotBossBonusWeightMultiplier
         bossDamage = min(self.getBossDamage() + bossDamage, self.bossMaxDamage)
         self.b_setBossDamage(bossDamage, 0, 0)
         if self.bossDamage >= self.bossMaxDamage:
@@ -101,21 +103,59 @@ class DistributedLawbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FSM
             self.__recordHit()
 
     def healBoss(self, bossHeal):
-        bossDamage = -bossHeal
         avId = self.air.getAvatarIdFromSender()
-        currState = self.getCurrentOrNextState()
-        if currState != 'BattleThree':
+        if avId:
+            self.air.writeServerEvent(
+                'suspicious', avId,
+                'unsupported client Lawbot boss heal request')
             return
-        bossDamage = min(self.getBossDamage() + bossDamage, self.bossMaxDamage)
-        bossDamage = max(bossDamage, 0)
+        # The lawyer AI legitimately calls this method.  Only that server-side
+        # path may choose the heal amount; the clsend field is never trusted.
+        if self.getCurrentOrNextState() != 'BattleThree':
+            return
+        try:
+            bossHeal = max(0, min(int(bossHeal), self.bossMaxDamage))
+        except (TypeError, ValueError):
+            return
+        bossDamage = max(self.getBossDamage() - bossHeal, 0)
         self.b_setBossDamage(bossDamage, 0, 0)
         if self.bossDamage == 0:
             self.b_setState('Defeat')
         else:
             self.__recordHit()
 
+    def hitDefensePan(self):
+        avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if (
+                avId not in self.involvedToons or
+                self.getCurrentOrNextState() != 'BattleThree' or
+                not allowAction(
+                    self.air, avId, 'boss.lawbot.defense-pan',
+                    rate=1.0, burst=1.0)):
+            return
+        from toontown.authority.ServerRewardRulesAI import (
+            lawbotDefensePanDamage)
+        bossDamage = lawbotDefensePanDamage(
+            self.weightPerToon.get(avId, 1),
+            self.bonusState,
+            ToontownGlobals.LawbotBossBonusWeightMultiplier)
+        bossDamage = min(
+            self.getBossDamage() + bossDamage,
+            self.bossMaxDamage)
+        self.b_setBossDamage(bossDamage, 0, 0)
+        if self.bossDamage >= self.bossMaxDamage:
+            self.b_setState('Victory')
+        else:
+            self.__recordHit()
+
     def hitBossInsides(self):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.lawbot.insides',
+                rate=1.0, burst=1.0):
+            return
         if not self.validate(avId, avId in self.involvedToons, 'hitBossInsides from unknown avatar'):
             return
         currState = self.getCurrentOrNextState()
@@ -126,6 +166,11 @@ class DistributedLawbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FSM
 
     def hitToon(self, toonId):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.lawbot.toonup',
+                rate=1.5, burst=2.0):
+            return
         if not self.validate(avId, avId != toonId, 'hitToon on self'):
             return
         if avId not in self.involvedToons or toonId not in self.involvedToons:

@@ -30,7 +30,16 @@ class DistributedCashbotBossCraneAI(DistributedObjectAI.DistributedObjectAI, FSM
 
     def requestControl(self):
         avId = self.air.getAvatarIdFromSender()
-        if avId in self.boss.involvedToons and self.avId == 0:
+        from toontown.authority.ServerActionGuardsAI import requireInteraction
+        avatar = self.air.doId2do.get(avId)
+        if (
+                avId in self.boss.involvedToons and
+                self.avId == 0 and
+                requireInteraction(
+                    self.air, avId, avatar,
+                    targetPosition=self.goonShield,
+                    maximum=35.0,
+                    action='boss.cashbot.crane.control')):
             craneId = self.__getCraneId(avId)
             if craneId == 0:
                 self.request('Controlled', avId)

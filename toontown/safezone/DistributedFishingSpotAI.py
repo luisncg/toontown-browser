@@ -57,6 +57,14 @@ class DistributedFishingSpotAI(DistributedObjectAI):
             self._record(avId, 'entered fishing spot from another zone')
             self.sendUpdateToAvatarId(avId, 'rejectEnter', [])
             return
+        from toontown.authority.ServerActionGuardsAI import requireInteraction
+        if not requireInteraction(
+                self.air, avId, avatar,
+                targetPosition=self.posHpr,
+                maximum=32.0,
+                action='fishing.enter'):
+            self.sendUpdateToAvatarId(avId, 'rejectEnter', [])
+            return
         if (self.avId or self._operationInFlight or
                 pond.hasToon(avId) is not None):
             if self.avId == avId:

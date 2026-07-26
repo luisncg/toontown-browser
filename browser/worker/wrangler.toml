@@ -11,5 +11,13 @@ routes = [
 binding = "ASSETS"
 bucket_name = "toontown-browser-assets"
 
+[[durable_objects.bindings]]
+name = "ASSET_BUDGETS"
+class_name = "AssetBudget"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AssetBudget"]
+
 [vars]
 PUBLIC_ORIGIN = "https://toontown.lui.ss"

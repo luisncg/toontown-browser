@@ -10,6 +10,7 @@ npm run test:game-authority
 npm run test:game-authority-python
 npm run test:game-authority-manager
 npm run test:game-authority-ledger
+npm run test:security-authority-guards
 npm run test:dc-schema-compatibility
 npm run test:estate-transactions
 npm run test:bingo-native

@@ -3,6 +3,7 @@ const status = document.querySelector("#status");
 const progress = document.querySelector("#progress");
 const transfer = document.querySelector("#transfer");
 const canvas = document.querySelector("#canvas");
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 const browserCheck = document.querySelector("#browser-check");
 const turnstileWidget = document.querySelector("#turnstile-widget");
 const mobileControlsElement = document.querySelector("#mobile-controls");

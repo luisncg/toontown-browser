@@ -51,12 +51,14 @@ class BrowserProgressionLedgerStore:
         except OSError:
             pass
         head = self._readHead(avatarRoot)
+        ledgerSequence = int(head['sequence']) + 1
         entry = {
             'version': 1,
             'previous': head['signature'],
             'mutation': mutation,
             'approvedState': state['st'],
-            'sequence': int(state['sq']),
+            'approvedSequence': int(state['sq']),
+            'sequence': ledgerSequence,
             'marker': state['m'],
             'details': safeDetails,
             'at': int(time.time() if now is None else now),
@@ -133,3 +135,82 @@ class BrowserProgressionLedgerStore:
                 os.close(handle)
             if os.path.exists(temporary):
                 os.unlink(temporary)
+
+
+class BrowserAuthorityHeadStore:
+    """Durable, signed high-water marks for runtime capability sessions."""
+
+    def __init__(self, secret, root=None):
+        if root is None:
+            root = os.environ.get('TOONTOWN_AUTHORITY_HEAD_DIR')
+        if not root:
+            if os.environ.get('TOONTOWN_PRODUCTION') == '1':
+                root = '/srv/toontown-browser/app/data/authority-heads'
+            else:
+                root = os.path.abspath(
+                    os.path.join('.build-wasm', 'state', 'authority-heads'))
+        self.secret = secret
+        self.root = os.path.abspath(root)
+        os.makedirs(self.root, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(self.root, 0o700)
+        except OSError:
+            pass
+
+    def observe(self, state):
+        sessionId = state.get('sid', '')
+        if (
+                not isinstance(sessionId, str) or len(sessionId) != 32 or
+                any(character not in '0123456789abcdef'
+                    for character in sessionId)):
+            raise ValueError('invalid authority session id')
+        current = self.read(sessionId)
+        if current is not None:
+            if int(state['sq']) < int(current['sq']):
+                return False
+            if int(state['sq']) == int(current['sq']):
+                return self._sameHead(current, state)
+        payload = {
+            'version': 1,
+            'sid': sessionId,
+            'pk': state['pk'],
+            'release': state['r'],
+            'contentEpoch': state['ce'],
+            'marker': state['m'],
+            'sq': int(state['sq']),
+            'state': state['st'],
+            'updatedAt': int(time.time()),
+        }
+        payload['signature'] = hmac.new(
+            self.secret, _canonical(payload), hashlib.sha256).hexdigest()
+        self._write(sessionId, payload)
+        return True
+
+    def read(self, sessionId):
+        path = os.path.join(self.root, '%s.json' % sessionId)
+        if not os.path.exists(path):
+            return None
+        with open(path, 'rb') as stream:
+            payload = json.loads(stream.read().decode('utf8'))
+        signature = payload.pop('signature', None)
+        expected = hmac.new(
+            self.secret, _canonical(payload), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature or '', expected):
+            raise ValueError('authority head signature mismatch')
+        payload['signature'] = signature
+        return payload
+
+    @staticmethod
+    def _sameHead(current, state):
+        return (
+            current.get('sid') == state.get('sid') and
+            current.get('pk') == state.get('pk') and
+            current.get('release') == state.get('r') and
+            current.get('contentEpoch') == state.get('ce') and
+            current.get('marker') == state.get('m') and
+            current.get('state') == state.get('st'))
+
+    def _write(self, sessionId, payload):
+        BrowserProgressionLedgerStore._writeAtomic(
+            os.path.join(self.root, '%s.json' % sessionId),
+            _canonical(payload) + b'\n')

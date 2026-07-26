@@ -1,0 +1,3 @@
+BACKUP_REPOSITORY=git@github.com:luisncg/toontown-player-state-backups.git
+BACKUP_AGE_RECIPIENT=age120fednfy0sa2xc5qdkw2gmdyhgrsa5n3vvg7jy89s3t05n4yrs2qx2tm7e
+BACKUP_SSH_KEY=/etc/toontown-browser/backup-repository-ed25519

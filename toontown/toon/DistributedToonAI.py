@@ -26,6 +26,7 @@ from toontown.fishing import FishCollection
 from toontown.fishing import FishTank
 from .NPCToons import npcFriends, isZoneProtected
 from toontown.coghq import CogDisguiseGlobals
+import hashlib
 import random
 import re
 import os
@@ -66,6 +67,44 @@ if simbase.wantKarts:
 
 class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoothNodeAI.DistributedSmoothNodeAI, PetLookerAI.PetLookerAI):
     notify = DirectNotifyGlobal.directNotify.newCategory('DistributedToonAI')
+    _LEDGERED_DB_FIELDS = frozenset((
+        'setDNAString', 'setGM', 'setMaxBankMoney', 'setBankMoney',
+        'setMaxMoney', 'setMoney', 'setMaxHp', 'setHp', 'setExperience',
+        'setMaxCarry', 'setTrackAccess', 'setTrackProgress',
+        'setTrackBonusLevel', 'setInventory', 'setReactiveGagCounts',
+        'setMaxNPCFriends', 'setNPCFriendsDict', 'setDefaultShard',
+        'setDefaultZone', 'setShtickerBook', 'setZonesVisited',
+        'setHoodsVisited', 'setInterface', 'setLastHood', 'setTutorialAck',
+        'setMaxClothes', 'setClothesTopsList', 'setClothesBottomsList',
+        'setMaxAccessories', 'setHatList', 'setGlassesList',
+        'setBackpackList', 'setShoesList', 'setHat', 'setGlasses',
+        'setBackpack', 'setShoes', 'setGardenSpecials', 'setEmoteAccess',
+        'setCustomMessages', 'setResistanceMessages', 'setPetTrickPhrases',
+        'setCatalogSchedule', 'setCatalog', 'setMailboxContents',
+        'setDeliverySchedule', 'setGiftSchedule', 'setAwardMailboxContents',
+        'setAwardSchedule', 'setAwardNotify', 'setCatalogNotify',
+        'setEstateTransactionJournal', 'setSpeedChatStyleIndex',
+        'setTeleportAccess', 'setCogStatus', 'setCogCount', 'setCogRadar',
+        'setBuildingRadar', 'setCogLevels', 'setCogTypes', 'setCogParts',
+        'setCogMerits', 'setHouseId', 'setQuests', 'setQuestHistory',
+        'setRewardHistory', 'setQuestCarryLimit', 'setCheesyEffect',
+        'setPosIndex', 'setFishCollection', 'setMaxFishTank', 'setFishTank',
+        'setFishingRod', 'setFishingTrophies', 'setFlowerCollection',
+        'setFlowerBasket', 'setMaxFlowerBasket', 'setGardenTrophies',
+        'setShovel', 'setShovelSkill', 'setWateringCan',
+        'setWateringCanSkill', 'setPetId', 'setPetTutorialDone',
+        'setFishBingoTutorialDone', 'setFishBingoMarkTutorialDone',
+        'setKartBodyType', 'setKartBodyColor', 'setKartAccessoryColor',
+        'setKartEngineBlockType', 'setKartSpoilerType',
+        'setKartFrontWheelWellType', 'setKartBackWheelWellType',
+        'setKartRimType', 'setKartDecalType', 'setTickets',
+        'setKartingHistory', 'setKartingTrophies',
+        'setKartingPersonalBest', 'setKartingPersonalBest2',
+        'setKartAccessoriesOwned', 'setCogSummonsEarned',
+        'setGardenStarted', 'setGolfHistory', 'setPackedGolfHoleBest',
+        'setGolfCourseBest', 'setPinkSlips', 'setNametagStyle',
+        'setDISLid',
+    ))
     maxCallsPerNPC = 100
     partTypeIds = {ToontownGlobals.FT_FullSuit: (CogDisguiseGlobals.leftLegIndex,
                                    CogDisguiseGlobals.rightLegIndex,
@@ -77,6 +116,30 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
      ToontownGlobals.FT_Torso: (CogDisguiseGlobals.torsoIndex,)}
     WantTpTrack = simbase.config.GetBool('want-tptrack', False)
     WantOldGMNameBan = simbase.config.GetBool('want-old-gm-name-ban', 1)
+
+    def sendUpdate(self, fieldName, args=None, sendToId=None):
+        if args is None:
+            args = []
+        if fieldName in self._LEDGERED_DB_FIELDS:
+            manager = getattr(self.air, 'browserAuthorityManager', None)
+            digest = hashlib.sha256(
+                repr(args).encode('utf8')).hexdigest()
+            approved = (
+                manager is not None and
+                manager.recordProgressionMutation(
+                    self.doId,
+                    'toon.field.approved',
+                    {'field': fieldName, 'valueDigest': digest}))
+            if not approved and (
+                    os.environ.get('TOONTOWN_PRODUCTION') == '1' or
+                    config.GetBool('browser-authority-enforce', False)):
+                self.notify.warning(
+                    'Blocked unledgered persistence update %s for Toon %s.'
+                    % (fieldName, self.doId))
+                raise RuntimeError(
+                    'durable progression approval was unavailable')
+        return DistributedPlayerAI.DistributedPlayerAI.sendUpdate(
+            self, fieldName, args, sendToId)
 
     def __init__(self, air):
         DistributedPlayerAI.DistributedPlayerAI.__init__(self, air)

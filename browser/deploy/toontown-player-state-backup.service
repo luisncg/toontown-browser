@@ -1,0 +1,30 @@
+[Unit]
+Description=Encrypted off-host Toontown Browser player-state backup
+After=network-online.target toontown-browser.service
+Wants=network-online.target
+OnFailure=toontown-player-state-backup-health.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/toontown-player-state-backup
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/srv/toontown-browser/app
+ReadOnlyPaths=/etc/toontown-browser/backup-environment
+ReadWritePaths=/var/lib/toontown-player-state-backup
+ReadWritePaths=/run/lock

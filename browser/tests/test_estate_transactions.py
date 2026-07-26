@@ -50,6 +50,21 @@ class FakeDClass:
         return FakeField()
 
 
+class FakeToonDClass(FakeDClass):
+    def getName(self):
+        return 'DistributedToon'
+
+
+class FakeAuthorityManager:
+    def __init__(self, approved=True):
+        self.approved = approved
+        self.calls = []
+
+    def recordProgressionMutation(self, avId, mutation, details):
+        self.calls.append((avId, mutation, details))
+        return self.approved
+
+
 class EstateTransactionTests(unittest.TestCase):
     def test_multi_field_compare_and_swap_success(self):
         air = FakeAir()
@@ -121,6 +136,35 @@ class EstateTransactionTests(unittest.TestCase):
         self.assertEqual(
             air.dbInterface.calls[0][3]['setLastEpochTimeStamp'],
             (1784378866,))
+
+    def test_toon_compare_and_swap_requires_durable_progression_approval(self):
+        air = FakeAir()
+        air.browserAuthorityManager = FakeAuthorityManager(approved=False)
+        transaction = AstronObjectTransaction(
+            air, 1234, FakeToonDClass())
+        result = []
+        transaction.commit(
+            {'setMoney': 10},
+            {'setMoney': 20},
+            lambda committed, conflict: result.append((committed, conflict)))
+        self.assertEqual(result, [(False, {})])
+        self.assertEqual(air.dbInterface.calls, [])
+        self.assertEqual(
+            air.browserAuthorityManager.calls[0][1],
+            'astron.cas.approved')
+
+    def test_toon_compare_and_swap_records_approval_and_commit(self):
+        air = FakeAir()
+        air.browserAuthorityManager = FakeAuthorityManager()
+        transaction = AstronObjectTransaction(
+            air, 1234, FakeToonDClass())
+        transaction.commit(
+            {'setMoney': 10},
+            {'setMoney': 20},
+            lambda committed, conflict: None)
+        self.assertEqual(
+            [call[1] for call in air.browserAuthorityManager.calls],
+            ['astron.cas.approved', 'astron.cas.committed'])
 
     def test_response_cache_replays_only_matching_payload(self):
         cache = ResponseReplayCache(capacity=2)

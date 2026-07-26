@@ -8,11 +8,14 @@ from toontown.shtiker import PurchaseManagerAI
 from toontown.shtiker import NewbiePurchaseManagerAI
 from . import MinigameCreatorAI
 from direct.task import Task
+import os
 import random
+import time
 from . import MinigameGlobals
 from direct.showbase import PythonUtil
 from . import TravelGameGlobals
 from toontown.toonbase import ToontownGlobals
+from toontown.authority.ServerRewardRulesAI import boundedMinigameReward
 EXITED = 0
 EXPECTED = 1
 JOINED = 2
@@ -47,6 +50,8 @@ class DistributedMinigameAI(DistributedObjectAI.DistributedObjectAI):
             self.trolleyZoneOverride = None
             self.metagameRound = -1
             self.startingVotes = {}
+            self.frameworkGameStartedAt = None
+            self.frameworkGameEndedAt = None
 
         return
 
@@ -251,10 +256,45 @@ class DistributedMinigameAI(DistributedObjectAI.DistributedObjectAI):
     def enterFrameworkGame(self):
         self.notify.debug('BASE: enterFrameworkGame')
         self.gameStartTime = globalClock.getRealTime()
+        self.frameworkGameStartedAt = time.monotonic()
+        self.frameworkGameEndedAt = None
         self.b_setGameStart(globalClockDelta.localToNetworkTime(self.gameStartTime))
 
     def exitFrameworkGame(self):
-        pass
+        if self.frameworkGameStartedAt is not None:
+            self.frameworkGameEndedAt = time.monotonic()
+
+    def _authoritativeReward(self, avId):
+        """Return a server-owned trolley reward independent of client scores.
+
+        Legacy minigames still use client reports to drive presentation, but
+        those reports no longer mint currency.  The economy reward is derived
+        only from server-observed participation time and framework state.
+        """
+        # A complete ordinary trolley game earns roughly 15-25 beans.  The
+        # result is intentionally time-based and bounded; fabricated catches,
+        # photos, coordinates, forces, or landing times cannot raise it.
+        return boundedMinigameReward(
+            self.normalExit,
+            avId in self.avIdList,
+            self.stateDict.get(avId),
+            EXITED,
+            self.frameworkGameStartedAt,
+            self.frameworkGameEndedAt)
+
+    def _approveProgressionReward(self, avId, score):
+        manager = getattr(self.air, 'browserAuthorityManager', None)
+        if manager is None:
+            return os.environ.get('TOONTOWN_PRODUCTION') != '1'
+        return manager.recordProgressionMutation(
+            avId,
+            'minigame.reward.approved',
+            {
+                'minigame': int(self.minigameId),
+                'zone': int(self.getSafezoneId()),
+                'beans': int(score),
+                'source': 'server-participation-time',
+            })
 
     def enterFrameworkWaitClientsExit(self):
         self.notify.debug('BASE: enterFrameworkWaitClientsExit')
@@ -278,6 +318,13 @@ class DistributedMinigameAI(DistributedObjectAI.DistributedObjectAI):
             self.notify.debug('BASE: Ignoring setAvatarExit message')
             return
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition,
+        )
+        if not consumeProtectedTransition(
+                self.air, avId, 'minigame.finish',
+                {'game': self.doId}):
+            return
         self.notify.debug('BASE: setAvatarExited: avatar id exited: ' + str(avId))
         self.stateDict[avId] = EXITED
         self.notify.debug('BASE: setAvatarExited: new avId states: ' + str(self.stateDict))
@@ -296,17 +343,9 @@ class DistributedMinigameAI(DistributedObjectAI.DistributedObjectAI):
         if not self.hasScoreMult():
             scoreMult = 1.0
         self.notify.debug('score multiplier: %s' % scoreMult)
-        for avId in self.avIdList:
-            self.scoreDict[avId] *= scoreMult
-
         scoreList = []
-        if not self.normalExit:
-            randReward = random.randrange(DEFAULT_POINTS, MAX_POINTS + 1)
         for avId in self.avIdList:
-            if self.normalExit:
-                score = int(self.scoreDict[avId] + 0.5)
-            else:
-                score = randReward
+            score = int(self._authoritativeReward(avId) * scoreMult + 0.5)
             if ToontownGlobals.JELLYBEAN_TROLLEY_HOLIDAY in simbase.air.holidayManager.currentHolidays or ToontownGlobals.JELLYBEAN_TROLLEY_HOLIDAY_MONTH in simbase.air.holidayManager.currentHolidays:
                 score *= MinigameGlobals.JellybeanTrolleyHolidayScoreMultiplier
             logEvent = False
@@ -318,6 +357,12 @@ class DistributedMinigameAI(DistributedObjectAI.DistributedObjectAI):
                 logEvent = True
             if logEvent:
                 self.air.writeServerEvent('suspicious', avId, 'got %s jellybeans playing minigame %s in zone %s' % (score, self.minigameId, self.getSafezoneId()))
+            if score and not self._approveProgressionReward(avId, score):
+                self.air.writeServerEvent(
+                    'suspicious', avId,
+                    'blocked unledgered minigame reward %s for %s' %
+                    (score, self.minigameId))
+                score = 0
             scoreList.append(score)
 
         self.requestDelete()

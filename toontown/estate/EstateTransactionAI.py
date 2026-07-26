@@ -11,6 +11,8 @@ Flows which touch both a Toon and a House need an explicit recovery journal.
 """
 
 from collections import OrderedDict, deque
+import hashlib
+import os
 
 
 def unpack_field_value(value):
@@ -100,6 +102,10 @@ class AstronObjectTransaction:
     def commit(self, oldFields, newFields, callback):
         if set(oldFields) != set(newFields):
             raise ValueError('transaction field sets must match')
+        progression = self._progressionApproval(oldFields, newFields)
+        if progression is False:
+            callback(False, {})
+            return
         packedOldFields = {
             name: self._packValue(name, value)
             for name, value in oldFields.items()
@@ -111,6 +117,9 @@ class AstronObjectTransaction:
 
         def handleResult(conflictingFields):
             if conflictingFields is None:
+                if progression:
+                    self._recordProgression(
+                        'astron.cas.committed', progression)
                 callback(True, None)
                 return
             normalized = {
@@ -126,6 +135,30 @@ class AstronObjectTransaction:
             packedNewFields,
             packedOldFields,
             handleResult)
+
+    def _progressionApproval(self, oldFields, newFields):
+        getName = getattr(self.dclass, 'getName', None)
+        dclassName = getName() if getName is not None else 'unknown'
+        fields = sorted(str(field) for field in newFields)
+        digest = hashlib.sha256(repr([
+            (field, oldFields[field], newFields[field])
+            for field in sorted(newFields)
+        ]).encode('utf8')).hexdigest()
+        details = {
+            'dclass': str(dclassName)[:128],
+            'fields': fields,
+            'valueDigest': digest,
+        }
+        if not self._recordProgression('astron.cas.approved', details):
+            return False
+        return details
+
+    def _recordProgression(self, mutation, details):
+        manager = getattr(self.air, 'browserAuthorityManager', None)
+        if manager is None:
+            return os.environ.get('TOONTOWN_PRODUCTION') != '1'
+        return manager.recordProgressionMutation(
+            self.doId, mutation, details)
 
     def _packValue(self, fieldName, value):
         getField = getattr(self.dclass, 'getFieldByName', None)

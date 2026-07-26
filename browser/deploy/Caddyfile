@@ -23,7 +23,7 @@ toontown.lui.ss {
 	}
 
 	header {
-		Content-Security-Policy "frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+		Content-Security-Policy "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com wss://toontown.lui.ss; media-src 'self' data: blob:; worker-src 'self' blob:; frame-src https://challenges.cloudflare.com; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'"
 		X-Frame-Options DENY
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer

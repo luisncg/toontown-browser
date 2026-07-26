@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly state_root="/var/lib/toontown-player-state-backup"
+readonly success_file="${state_root}/last-success.json"
+readonly maximum_age_seconds=129600
+
+if [[ ! -s "${success_file}" ]]; then
+  echo "No successful player-state backup has been recorded." >&2
+  exit 1
+fi
+
+now="$(date +%s)"
+last_success="$(stat -c '%Y' "${success_file}")"
+age_seconds="$((now - last_success))"
+if (( age_seconds < 0 || age_seconds > maximum_age_seconds )); then
+  echo "The latest player-state backup is stale." >&2
+  exit 1
+fi
+
+systemctl is-active --quiet toontown-browser.service
+echo "Player-state backup health is current."

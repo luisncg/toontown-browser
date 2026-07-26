@@ -28,6 +28,11 @@ const ACTIONS = new Set([
   "fish-bingo.claim",
   "mega.join",
   "mega.vote",
+  "npc.interact",
+  "catalog.purchase",
+  "boss.reward",
+  "minigame.finish",
+  "race.finish",
   "trolley.board",
 ]);
 
@@ -182,6 +187,36 @@ export function normalizeGameTransitionTarget(action, target) {
     return Object.freeze({
       elevator: integer(value.elevator, 1, 0xffff_ffff, "Elevator id"),
       zone: integer(value.zone, 1, 0xffff_ffff, "Elevator zone"),
+    });
+  }
+  if (action === "npc.interact") {
+    return Object.freeze({
+      npc: integer(value.npc, 1, 0xffff_ffff, "NPC id"),
+      zone: integer(value.zone, 1, 0xffff_ffff, "NPC zone"),
+    });
+  }
+  if (action === "catalog.purchase") {
+    return Object.freeze({
+      phone: integer(value.phone, 1, 0xffff_ffff, "Phone id"),
+      context: integer(value.context, 0, 0xffff_ffff, "Catalog context"),
+      gift: integer(value.gift, 0, 1, "Catalog gift flag"),
+    });
+  }
+  if (action === "boss.reward") {
+    return Object.freeze({
+      boss: integer(value.boss, 1, 0xffff_ffff, "Boss id"),
+      reward: integer(value.reward, 0, 0xffff_ffff, "Boss reward id"),
+    });
+  }
+  if (action === "minigame.finish") {
+    return Object.freeze({
+      game: integer(value.game, 1, 0xffff_ffff, "Minigame id"),
+    });
+  }
+  if (action === "race.finish") {
+    return Object.freeze({
+      race: integer(value.race, 1, 0xffff_ffff, "Race id"),
+      laps: integer(value.laps, 1, 0x7f, "Race lap count"),
     });
   }
   return Object.freeze({

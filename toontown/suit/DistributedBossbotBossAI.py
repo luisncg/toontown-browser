@@ -437,10 +437,18 @@ class DistributedBossbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FS
 
     def hitBoss(self, bossDamage):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.bossbot.hit',
+                rate=1.5, burst=2.0):
+            return
         if not self.validate(avId, avId in self.involvedToons, 'DistributedBossbotBossAI.hitBoss from unknown avatar'):
             return
-        self.validate(avId, bossDamage <= 3, 'invalid bossDamage %s' % bossDamage)
-        if bossDamage < 1:
+        from toontown.authority.ServerRewardRulesAI import fixedBossDamage
+        bossDamage = fixedBossDamage(bossDamage)
+        if not self.validate(
+                avId, bossDamage is not None,
+                'invalid bossDamage claim'):
             return
         currState = self.getCurrentOrNextState()
         if currState != 'BattleFour':

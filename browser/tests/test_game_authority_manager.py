@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import subprocess
+import tempfile
 import types
 import unittest
 
@@ -9,8 +10,13 @@ from toontown.authority.BrowserAuthorityManagerAI import (
     BrowserAuthorityManagerAI,
 )
 from toontown.authority.BrowserCapabilityTokensAI import (
+    advance_state,
     verify_state,
     verify_transition,
+)
+from toontown.authority.BrowserProgressionLedgerAI import (
+    BrowserAuthorityHeadStore,
+    BrowserProgressionLedgerStore,
 )
 
 
@@ -56,6 +62,8 @@ class GameAuthorityManagerTests(unittest.TestCase):
             text=True)
         self.fixture = json.loads(output)
         self.events = []
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.manager = _Manager.__new__(_Manager)
         self.manager.enforce = True
         self.manager.secret = self.secret
@@ -63,6 +71,10 @@ class GameAuthorityManagerTests(unittest.TestCase):
         self.manager.sessionOwners = {}
         self.manager.pending = {}
         self.manager.recentReceipts = {}
+        self.manager.authorityHeads = BrowserAuthorityHeadStore(
+            self.secret, root=os.path.join(self.temporary.name, 'heads'))
+        self.manager.progressionLedger = BrowserProgressionLedgerStore(
+            self.secret, root=os.path.join(self.temporary.name, 'ledger'))
         self.manager.updates = []
         self.manager.air = types.SimpleNamespace(
             doId2do={},
@@ -114,6 +126,56 @@ class GameAuthorityManagerTests(unittest.TestCase):
             'fish-bingo.claim',
             {'manager': 501, 'card': 8}))
         self.assertEqual(self.manager.states[avId]['sq'], 0)
+
+    def test_durable_high_water_rejects_runtime_rewind(self):
+        avId = 1234
+        state = verify_state(
+            self.fixture['state']['stateToken'], self.secret)
+        transition = verify_transition(
+            self.fixture['transition']['capability'], secret=self.secret)
+        successor = advance_state(transition, self.secret)
+        nextState = verify_state(successor['stateToken'], self.secret)
+        self.assertTrue(self.manager.authorityHeads.observe(nextState))
+        self.manager.states[avId] = state
+        self.manager.pending[avId] = {
+            'requestId': 19,
+            'capability': self.fixture['transition']['capability'],
+            'transition': transition,
+        }
+        self.assertFalse(self.manager.consumeTransition(
+            avId,
+            'fish-bingo.claim',
+            {'manager': 501, 'card': 7}))
+        self.assertEqual(self.manager.states[avId]['sq'], 0)
+
+    def test_restarted_manager_rejects_old_runtime_registration(self):
+        avId = 1234
+        state = verify_state(
+            self.fixture['state']['stateToken'], self.secret)
+        transition = verify_transition(
+            self.fixture['transition']['capability'], secret=self.secret)
+        successor = advance_state(transition, self.secret)
+        nextState = verify_state(successor['stateToken'], self.secret)
+        self.assertTrue(self.manager.authorityHeads.observe(nextState))
+        restartedStore = BrowserAuthorityHeadStore(
+            self.secret,
+            root=os.path.join(self.temporary.name, 'heads'))
+        self.manager.authorityHeads = restartedStore
+        self.manager.air.getAvatarIdFromSender = lambda: avId
+        self.manager.air.getAvatarExitEvent = (
+            lambda value: 'avatar-exit-%s' % value)
+        self.manager.registerRuntime(self.fixture['state']['stateToken'])
+        self.assertNotIn(avId, self.manager.states)
+        self.assertEqual(
+            self.manager.updates[-1][1], 'transitionRejected')
+        self.assertFalse(restartedStore.observe(state))
+
+    def test_server_driven_progression_is_durably_recorded(self):
+        self.assertTrue(self.manager.recordProgressionMutation(
+            1234, 'offline.delivery', {'itemDigest': 'c' * 64}))
+        headPath = os.path.join(
+            self.temporary.name, 'ledger', '1234', 'head.json')
+        self.assertTrue(os.path.exists(headPath))
 
 
 if __name__ == '__main__':

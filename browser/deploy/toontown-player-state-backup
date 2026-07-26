@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+readonly environment_file="/etc/toontown-browser/backup-environment"
+readonly application_root="/srv/toontown-browser/app"
+readonly state_root="/var/lib/toontown-player-state-backup"
+readonly repository_root="${state_root}/repository"
+readonly lock_file="/run/lock/toontown-player-state-backup.lock"
+readonly service_name="toontown-browser.service"
+
+if [[ ! -r "${environment_file}" ]]; then
+  echo "Backup environment is unavailable." >&2
+  exit 1
+fi
+
+# This file is root-owned and may contain only backup-scoped configuration.
+# shellcheck disable=SC1090
+source "${environment_file}"
+
+: "${BACKUP_REPOSITORY:?BACKUP_REPOSITORY is required}"
+: "${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT is required}"
+: "${BACKUP_SSH_KEY:?BACKUP_SSH_KEY is required}"
+
+if [[ "${BACKUP_REPOSITORY}" != \
+      "git@github.com:luisncg/toontown-player-state-backups.git" ]]; then
+  echo "Refusing an unexpected backup repository." >&2
+  exit 1
+fi
+if [[ "${BACKUP_SSH_KEY}" != \
+      "/etc/toontown-browser/backup-repository-ed25519" ]]; then
+  echo "Refusing an unexpected backup SSH key." >&2
+  exit 1
+fi
+if [[ ! -r "${BACKUP_SSH_KEY}" ]]; then
+  echo "Backup repository key is unavailable." >&2
+  exit 1
+fi
+
+exec 9>"${lock_file}"
+if ! flock -n 9; then
+  echo "Another player-state backup is already running." >&2
+  exit 1
+fi
+
+temporary_root="$(mktemp -d "${state_root}/run.XXXXXXXX")"
+frozen=0
+
+cleanup() {
+  if (( frozen )); then
+    systemctl thaw "${service_name}" >/dev/null 2>&1 || true
+  fi
+  rm -rf -- "${temporary_root}"
+}
+trap cleanup EXIT INT TERM
+
+if [[ ! -d "${repository_root}/.git" ]]; then
+  echo "The initialized private backup repository is unavailable." >&2
+  exit 1
+fi
+
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/toontown-browser/github-known-hosts -i ${BACKUP_SSH_KEY}"
+git -C "${repository_root}" fetch --quiet origin main
+git -C "${repository_root}" reset --quiet --hard origin/main
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+archive_name="toontown-player-state-${timestamp}.tar.gz"
+encrypted_name="${archive_name}.age"
+archive_path="${temporary_root}/${archive_name}"
+encrypted_path="${temporary_root}/${encrypted_name}"
+
+# Freezing the service's cgroup keeps Astron and the AI process at one
+# filesystem-consistent point without disconnecting their sockets. The data
+# set is small, so the freeze normally lasts well below one second.
+systemctl freeze "${service_name}"
+frozen=1
+tar \
+  --acls \
+  --xattrs \
+  --numeric-owner \
+  --create \
+  --gzip \
+  --file "${archive_path}" \
+  --directory "${application_root}" \
+  astron/databases \
+  data
+systemctl thaw "${service_name}"
+frozen=0
+
+plain_digest="$(sha256sum "${archive_path}" | awk '{print $1}')"
+plain_bytes="$(stat -c '%s' "${archive_path}")"
+age --encrypt \
+  --recipient "${BACKUP_AGE_RECIPIENT}" \
+  --output "${encrypted_path}" \
+  "${archive_path}"
+encrypted_bytes="$(stat -c '%s' "${encrypted_path}")"
+
+snapshot_directory="${repository_root}/snapshots"
+manifest_directory="${repository_root}/manifests"
+mkdir -p "${snapshot_directory}" "${manifest_directory}"
+install -m 0600 "${encrypted_path}" \
+  "${snapshot_directory}/${encrypted_name}"
+
+manifest_path="${manifest_directory}/${timestamp}.json"
+printf '%s\n' \
+  '{' \
+  '  "format": 1,' \
+  "  \"createdAt\": \"${timestamp}\"," \
+  "  \"archive\": \"snapshots/${encrypted_name}\"," \
+  "  \"plaintextBytes\": ${plain_bytes}," \
+  "  \"encryptedBytes\": ${encrypted_bytes}," \
+  "  \"plaintextSha256\": \"${plain_digest}\"," \
+  '  "retention": "indefinite"' \
+  '}' >"${manifest_path}"
+install -m 0600 "${manifest_path}" "${repository_root}/latest.json"
+
+git -C "${repository_root}" add \
+  "snapshots/${encrypted_name}" \
+  "manifests/${timestamp}.json" \
+  latest.json
+git -C "${repository_root}" \
+  -c user.name="Toontown Player-State Backup" \
+  -c user.email="backup@toontown.lui.ss" \
+  commit --quiet -m "Encrypted player-state backup ${timestamp}"
+git -C "${repository_root}" push --quiet origin HEAD:main
+
+commit="$(git -C "${repository_root}" rev-parse HEAD)"
+printf '%s\n' \
+  '{' \
+  "  \"createdAt\": \"${timestamp}\"," \
+  "  \"commit\": \"${commit}\"," \
+  '  "status": "ok"' \
+  '}' >"${state_root}/last-success.json"
+chmod 0600 "${state_root}/last-success.json"

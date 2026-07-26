@@ -351,10 +351,17 @@ class DistributedCashbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FS
 
     def recordHit(self, damage):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if not allowAction(
+                self.air, avId, 'boss.cashbot.hit',
+                rate=1.5, burst=2.0):
+            return
         if not self.validate(avId, avId in self.involvedToons, 'recordHit from unknown avatar'):
             return
         if self.state != 'BattleThree':
             return
+        # Only server-validated safe/goon collisions call this method.
+        damage = min(50, max(1, int(damage)))
         self.b_setBossDamage(self.bossDamage + damage)
         if self.bossDamage >= self.bossMaxDamage:
             self.b_setState('Victory')
@@ -384,10 +391,37 @@ class DistributedCashbotBossAI(DistributedBossCogAI.DistributedBossCogAI, FSM.FS
 
     def applyReward(self):
         avId = self.air.getAvatarIdFromSender()
+        from toontown.authority.BrowserAuthorityManagerAI import (
+            consumeProtectedTransition,
+        )
+        if not consumeProtectedTransition(
+                self.air, avId, 'boss.reward',
+                {'boss': self.doId, 'reward': self.rewardId}):
+            return
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        if (
+                self.getCurrentOrNextState() != 'Epilogue' or
+                not allowAction(
+                    self.air, avId, 'boss.cashbot.reward',
+                    rate=0.1, burst=1.0)):
+            return
         if avId in self.involvedToons and avId not in self.rewardedToons:
-            self.rewardedToons.append(avId)
             toon = self.air.doId2do.get(avId)
             if toon:
+                authority = getattr(
+                    self.air, 'browserAuthorityManager', None)
+                if authority is not None and not authority.recordProgressionMutation(
+                        avId,
+                        'boss.cashbot.reward.approved',
+                        {
+                            'boss': int(self.doId),
+                            'reward': int(self.rewardId),
+                        }):
+                    self.air.writeServerEvent(
+                        'suspicious', avId,
+                        'blocked unledgered Cashbot reward')
+                    return
+                self.rewardedToons.append(avId)
                 toon.doResistanceEffect(self.rewardId)
 
     def enterOff(self):

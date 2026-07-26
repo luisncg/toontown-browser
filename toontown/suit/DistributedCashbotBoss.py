@@ -592,7 +592,13 @@ class DistributedCashbotBoss(DistributedBossCog.DistributedBossCog, FSM.FSM):
         self.rewardId = rewardId
 
     def d_applyReward(self):
-        self.sendUpdate('applyReward', [])
+        from toontown.authority.BrowserAuthorityManager import (
+            requestTransition,
+        )
+        requestTransition(
+            'boss.reward',
+            {'boss': self.doId, 'reward': self.rewardId},
+            lambda: self.sendUpdate('applyReward', []))
 
     def stunAllGoons(self):
         for goon in self.goons:

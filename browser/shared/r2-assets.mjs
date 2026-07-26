@@ -297,6 +297,7 @@ export class WorkerAssetGatewayStore {
         name,
         contentType: entry.contentType,
         contentEncoding: useGzip ? "gzip" : "identity",
+        expectedBytes: representation.size,
       },
       this.secret,
     );

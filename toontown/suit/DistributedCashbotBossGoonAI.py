@@ -192,13 +192,33 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
 
     def hitBoss(self, impact):
         avId = self.air.getAvatarIdFromSender()
-        self.validate(avId, impact <= 1.0, 'invalid hitBoss impact %s' % impact)
-        if avId not in self.boss.involvedToons:
+        from toontown.authority.ServerActionGuardsAI import allowAction
+        try:
+            validImpact = math.isfinite(float(impact)) and 0.0 <= impact <= 1.0
+        except (TypeError, ValueError):
+            validImpact = False
+        if (
+                not validImpact or
+                not allowAction(
+                    self.air, avId, 'boss.cashbot.goon.hit',
+                    rate=0.75, burst=1.0) or
+                avId not in self.boss.involvedToons or
+                avId != self.avId):
             return
-        if self.state == 'Dropped' or self.state == 'Grabbed':
-            if not self.boss.heldObject:
-                damage = int(impact * 25 * self.scale)
-                self.boss.recordHit(max(damage, 2))
+        if (
+                self.state == 'Dropped' and
+                not self.boss.heldObject and
+                self.getPos(self.boss).length() <= 50.0):
+            # The server owns damage; client momentum is presentation only.
+            from toontown.authority.ServerRewardRulesAI import (
+                cashbotGoonDamage)
+            damage = cashbotGoonDamage(
+                self.scale, ToontownGlobals.CashbotBossKnockoutDamage)
+            self.boss.recordHit(damage)
+        elif self.getPos(self.boss).length() > 50.0:
+            self.air.writeServerEvent(
+                'suspicious', avId,
+                'Cashbot goon claimed a remote boss collision')
         self.b_destroyGoon()
 
     def d_setTarget(self, x, y, h, arrivalTime):
@@ -212,6 +232,14 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         self.destroyGoon()
 
     def destroyGoon(self):
+        avId = int(self.air.getAvatarIdFromSender() or 0)
+        if (
+                avId and
+                (avId != self.avId or avId not in self.boss.involvedToons)):
+            self.air.writeServerEvent(
+                'suspicious', avId,
+                'unauthorized Cashbot goon destruction')
+            return
         self.demand('Off')
 
     def enterOff(self):
