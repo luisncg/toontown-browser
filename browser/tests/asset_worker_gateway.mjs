@@ -228,7 +228,7 @@ assert.equal(
 
 const concurrencyBudget = isolatedBudget();
 const reservations = [];
-for (let index = 0; index < 10; index += 1) {
+for (let index = 0; index < 12; index += 1) {
   const reserved = await budgetCall(concurrencyBudget, "reserve", {
     scope: "session",
     ticket: index.toString(16).padStart(64, "0"),

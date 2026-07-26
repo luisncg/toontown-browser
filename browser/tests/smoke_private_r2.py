@@ -81,9 +81,16 @@ with sync_playwright() as playwright:
             ):
                 ticket_batch_responses.append(response.status)
             elif parsed.hostname == "toontown.lui.ss" and path.startswith("/assets/"):
+                opaque_ticket = path.rsplit("/", 1)[-1]
                 gateway_responses.append(
                     {
-                        "url": response.url,
+                        "ticketLength": len(opaque_ticket),
+                        "leakedAssetName": bool(
+                            re.search(
+                                r"open-toontown|phase-|releases/|[a-f0-9]{64}",
+                                path,
+                            )
+                        ),
                         "status": response.status,
                         "cache": response.headers.get("cache-control", ""),
                         "encoding": response.headers.get("content-encoding", ""),
@@ -156,12 +163,12 @@ with sync_playwright() as playwright:
     assert not cold_direct_r2, "the browser must never receive a direct R2 URL"
     assert cold_ticket_batches == [200], "cold boot must use one ticket batch"
     assert cold_gateway, "cold startup did not use the private Worker gateway"
-    assert all(item["status"] == 200 for item in cold_gateway)
+    assert all(item["status"] == 200 for item in cold_gateway), cold_gateway
     assert all(item["cache"] == "private, no-store" for item in cold_gateway)
     assert all(item["encoding"] == "gzip" for item in cold_gateway)
     assert all(item["disposition"].startswith("inline; filename=\"") for item in cold_gateway)
     assert all(
-        not re.search(r"open-toontown|phase-|releases/|[a-f0-9]{64}", item["url"])
+        not item["leakedAssetName"]
         for item in cold_gateway
     ), "opaque Worker tickets leaked asset names or release identifiers"
     assert not cold_origin_heavy, (

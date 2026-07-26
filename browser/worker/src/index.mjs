@@ -6,9 +6,10 @@ const BUDGET_WINDOW_MILLISECONDS = 15 * 60 * 1_000;
 const RESERVATION_TTL_MILLISECONDS = 5 * 60 * 1_000;
 const SESSION_BYTE_BUDGET = 768 * 1024 * 1024;
 const IP_BYTE_BUDGET = 4 * 1024 * 1024 * 1024;
-// Boot overlaps four Phase 4 parts, the main data/WASM pair, and two short
-// audio banks. Keep two recovery slots above that normal eight-stream peak.
-const SESSION_CONCURRENCY = 10;
+// Boot overlaps four Phase 4 parts, the main data/WASM pair, two short audio
+// banks, and brief response handoffs whose release callbacks can trail the
+// next fetch. Twelve keeps that measured cold-start burst inside the budget.
+const SESSION_CONCURRENCY = 12;
 const IP_CONCURRENCY = 30;
 const MAX_TICKET_USES = 3;
 const OBJECT_KEY = /^releases\/([a-f0-9]{64})\/([A-Za-z0-9._-]+)$/;
