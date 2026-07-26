@@ -18,6 +18,7 @@ def load_gateway_function():
     tree = ast.parse(source, filename=str(BROWSER_GAME))
     selected = []
     wanted_assignments = {
+        "LOCAL_ASTRON_DEVELOPMENT",
         "DEFAULT_BROWSER_GAME_SERVER",
         "BROWSER_GAME_SERVER_STORAGE_KEY",
         "_BROWSER_RESUME_TOKEN_RE",

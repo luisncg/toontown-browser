@@ -18,6 +18,7 @@ SPRINT_PATCH="$PROJECT_DIR/browser/patches/panda3d-direct-sprint.patch"
 GAME_BUILD=0
 RELEASE_BUILD=0
 PYTHON_BYTECODE=1
+LOCAL_ASTRON_DEVELOPMENT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,13 +31,26 @@ while [[ $# -gt 0 ]]; do
     --python-source-only)
       PYTHON_BYTECODE=0
       ;;
+    --local-astron-development)
+      LOCAL_ASTRON_DEVELOPMENT=1
+      ;;
     *)
-      echo "Usage: $0 [--game] [--release] [--python-source-only]" >&2
+      echo "Usage: $0 [--game] [--release] [--python-source-only] [--local-astron-development]" >&2
       exit 2
       ;;
   esac
   shift
 done
+
+if [[ $RELEASE_BUILD -eq 1 && $LOCAL_ASTRON_DEVELOPMENT -eq 1 ]]; then
+  echo "Release builds cannot enable direct local Astron development." >&2
+  exit 2
+fi
+if [[ $LOCAL_ASTRON_DEVELOPMENT -eq 1 ]]; then
+  BROWSER_PROFILE="enabled"
+else
+  BROWSER_PROFILE="disabled"
+fi
 
 for required in \
   "$EMSDK_DIR/emsdk_env.sh" \
@@ -84,11 +98,17 @@ else
   echo "Could not apply the browser sprint patch to Panda3D Direct." >&2
   exit 1
 fi
+python3 "$PROJECT_DIR/browser/scripts/configure-browser-profile.py" \
+  --direct-dir "$DIRECT_PACKAGE_DIR" \
+  --local-astron-development "$BROWSER_PROFILE"
 
 rsync -a \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \
   "$PROJECT_DIR/browser/client/" "$BROWSER_CLIENT_PACKAGE_DIR/"
+python3 "$PROJECT_DIR/browser/scripts/configure-browser-profile.py" \
+  --client-dir "$BROWSER_CLIENT_PACKAGE_DIR" \
+  --local-astron-development "$BROWSER_PROFILE"
 
 LAUNCHER_DEFINES=("-DOPEN_TOONTOWN_BROWSER_BUILD=1")
 PRELOAD_ARGS=(
@@ -189,6 +209,9 @@ if [[ $PYTHON_BYTECODE -eq 1 ]]; then
 fi
 
 rsync -a "$PROJECT_DIR/browser/web/" "$DIST_DIR/"
+python3 "$PROJECT_DIR/browser/scripts/configure-browser-profile.py" \
+  --web-dir "$DIST_DIR" \
+  --local-astron-development "$BROWSER_PROFILE"
 
 if [[ $RELEASE_BUILD -eq 1 ]]; then
   EMSCRIPTEN_PROFILE_ARGS=(-s ASSERTIONS=0)
@@ -315,6 +338,11 @@ perl -pi -e \
   "s/__TOONTOWN_RUNTIME_VERSION__/$RUNTIME_VERSION/g" \
   "$DIST_DIR/app.js"
 
+if [[ $RELEASE_BUILD -eq 1 ]]; then
+  python3 "$PROJECT_DIR/browser/scripts/verify-production-client.py" \
+    "$DIST_DIR"
+fi
+
 while IFS= read -r -d '' asset; do
   gzip -1 -n -c "$asset" > "$asset.gz"
 done < <(find "$DIST_DIR" -type f \( \
@@ -335,6 +363,11 @@ if [[ $RELEASE_BUILD -eq 1 ]]; then
   echo "Profile: release"
 else
   echo "Profile: debug"
+fi
+if [[ $LOCAL_ASTRON_DEVELOPMENT -eq 1 ]]; then
+  echo "Local Astron development: enabled"
+else
+  echo "Local Astron development: disabled"
 fi
 if [[ $PYTHON_BYTECODE -eq 1 ]]; then
   echo "Python packaging: sanitized CPython 3.12 bytecode"

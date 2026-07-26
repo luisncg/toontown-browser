@@ -726,6 +726,7 @@ function createTransportResumeToken() {
     .replaceAll("=", "");
 }
 
+/* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
 function isLocalDevelopmentPage() {
   const isLoopback = ["127.0.0.1", "localhost", "::1"].includes(
     window.location.hostname,
@@ -741,6 +742,7 @@ function localBrowserGameServerForPage() {
   url.searchParams.set("resume", createTransportResumeToken());
   return url.href;
 }
+/* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
 
 let browserGameServer = "";
 let browserGameServerPromise;
@@ -761,9 +763,11 @@ async function prepareBrowserGameServer() {
   if (browserGameServer) return browserGameServer;
   if (browserGameServerPromise) return browserGameServerPromise;
   browserGameServerPromise = (async () => {
+    /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
     if (isLocalDevelopmentPage()) {
       return rememberBrowserGameServer(localBrowserGameServerForPage());
     }
+    /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
     const authority = window.ToontownRuntimeAuthority;
     const response = authority
       ? await authority.signedRequest("/api/gateway/lease", {})
@@ -816,9 +820,11 @@ async function prepareBrowserGameServer() {
 }
 
 window.__toontownGameServer = "";
+/* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
 if (isLocalDevelopmentPage()) {
   rememberBrowserGameServer(localBrowserGameServerForPage());
 }
+/* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
 
 function clearCapturedKey() {
   capturedKeyGeneration += 1;
@@ -2841,7 +2847,7 @@ async function launchGameRuntime(runtimeChallenge) {
   });
   // Panda reads the game-server URL during synchronous runtime startup.
   // Finish the signed lease handoff before executing the WASM bootstrap or it
-  // can permanently capture the local 127.0.0.1 fallback for this page.
+  // can permanently capture a stale transport fallback for this page.
   await authorityPromise;
   await prepareBrowserGameServer();
   return loadGameRuntime();

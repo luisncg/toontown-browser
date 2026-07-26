@@ -41,11 +41,13 @@
   let gameSession;
   let gameSessionPromise;
 
+  /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
   function isLocalDevelopmentPage() {
     return ["127.0.0.1", "localhost", "::1"].includes(
       window.location.hostname,
     ) && ["8080", "8180"].includes(window.location.port);
   }
+  /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
 
   function base64url(bytes) {
     let binary = "";
@@ -189,7 +191,12 @@
   }
 
   async function prepare({ force = false } = {}) {
-    if (!required || isLocalDevelopmentPage()) {
+    if (
+      !required
+      /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
+      || isLocalDevelopmentPage()
+      /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
+    ) {
       return Object.freeze({
         version: PROTOCOL,
         release,
@@ -235,7 +242,12 @@
   }
 
   async function signedRequest(pathname, bodyObject, { retry = true } = {}) {
-    if (!required || isLocalDevelopmentPage()) {
+    if (
+      !required
+      /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_START */
+      || isLocalDevelopmentPage()
+      /* TOONTOWN_LOCAL_ASTRON_DEVELOPMENT_END */
+    ) {
       return nativeFetch(pathname, {
         method: "POST",
         cache: "no-store",

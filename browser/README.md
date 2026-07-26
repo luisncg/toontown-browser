@@ -84,7 +84,11 @@ npm run build:game
 
 `npm run build:wasm` produces a small procedural WebGL proof without the game
 resources. `npm run build:game` fetches the pinned resources checkout and
-produces the complete client in `dist-web/`.
+produces the complete release client in `dist-web/`. Release builds remove the
+direct loopback Astron development path and require the signed browser gateway.
+For an explicitly local build that can connect directly to the loopback Astron
+gateway, use `npm run build:game:debug`; that script enables the build-time
+`--local-astron-development` flag.
 
 The current release build transfers about 63 MiB on a cold start after HTTP
 compression. It blocks only on the engine, login/Pick-a-Toon resources, and the
