@@ -266,8 +266,8 @@ html.welcome-required .welcome-overlay {
 
 .shell {
   position: relative;
-  width: min(1600px, calc(100% - 40px));
-  width: min(1600px, calc(100% - 40px), 135svh);
+  width: min(1800px, calc(100% - 24px));
+  width: min(1800px, calc(100% - 24px), 150svh);
   margin: 0;
   padding: 0;
 }
@@ -281,7 +281,7 @@ html.welcome-required .welcome-overlay {
 
 h1 {
   margin: 0;
-  font-size: clamp(28px, 4vw, 54px);
+  font-size: clamp(24px, 3.2vw, 46px);
   font-weight: 850;
   letter-spacing: -.045em;
   line-height: 1;
