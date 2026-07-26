@@ -228,7 +228,7 @@ assert.equal(
 
 const concurrencyBudget = isolatedBudget();
 const reservations = [];
-for (let index = 0; index < 6; index += 1) {
+for (let index = 0; index < 10; index += 1) {
   const reserved = await budgetCall(concurrencyBudget, "reserve", {
     scope: "session",
     ticket: index.toString(16).padStart(64, "0"),
@@ -246,7 +246,7 @@ assert.equal(
     })
   ).status,
   429,
-  "the durable session concurrency budget must fail closed",
+  "the durable session concurrency budget must support boot but fail closed",
 );
 assert.equal(
   (

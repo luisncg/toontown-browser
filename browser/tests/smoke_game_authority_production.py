@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 from playwright.sync_api import sync_playwright
 
@@ -40,11 +41,16 @@ with sync_playwright() as playwright:
     )
     page.on("pageerror", lambda error: page_errors.append(str(error)))
     page.goto(ORIGIN, wait_until="domcontentloaded", timeout=120_000)
-    page.wait_for_function(
-        """window.ToontownRuntimeAuthority
-            ?.diagnostics?.()?.gameSessionReady === true""",
-        timeout=60_000,
-    )
+    authority_deadline = time.monotonic() + 60
+    while time.monotonic() < authority_deadline:
+        if page.evaluate(
+            "() => window.ToontownRuntimeAuthority"
+            "?.diagnostics?.()?.gameSessionReady === true"
+        ):
+            break
+        page.wait_for_timeout(100)
+    else:
+        raise AssertionError("production gameplay authority did not become ready")
     result = page.evaluate(
         """async () => {
           const authority = window.ToontownRuntimeAuthority;

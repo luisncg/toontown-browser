@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
@@ -111,12 +112,12 @@ with sync_playwright() as playwright:
         # The game intentionally keeps a WebSocket and background phase
         # streaming active, so it never reaches Playwright network-idle.
         page.goto(ORIGIN, wait_until="domcontentloaded", timeout=30_000)
-        try:
-            page.wait_for_function(
-                "document.querySelector('#transfer')?.textContent === 'Toontown is ready!'",
-                timeout=READY_TIMEOUT_MS,
-            )
-        except Exception:
+        ready_deadline = time.monotonic() + READY_TIMEOUT_MS / 1000
+        while time.monotonic() < ready_deadline:
+            if page.locator("#transfer").text_content() == "Toontown is ready!":
+                break
+            page.wait_for_timeout(100)
+        else:
             print(
                 "Production asset smoke startup diagnostics: "
                 f"gateway={gateway_responses}, "
@@ -126,7 +127,7 @@ with sync_playwright() as playwright:
                 f"failedRequests={failed_requests[-12:]}, "
                 f"transfer={page.locator('#transfer').text_content()!r}"
             )
-            raise
+            raise AssertionError("production asset startup did not become ready")
         page.evaluate("window.ToontownSecureAssetCache.waitForIdle()")
         # Let Playwright deliver any response events whose bodies completed
         # during the final direct-handoff/cache write before taking counts.
