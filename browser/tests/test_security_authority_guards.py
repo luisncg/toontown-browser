@@ -31,6 +31,7 @@ from toontown.authority.ServerRewardRulesAI import (
     fixedBossDamage,
     lawbotDefensePanDamage,
 )
+from toontown.toon.DistributedToonAI import DistributedToonAI
 
 
 class _MovementAvatar:
@@ -197,6 +198,19 @@ class SecurityAuthorityGuardTests(unittest.TestCase):
             databaseFields - (ledgeredFields or set()),
             set(),
             'A DistributedToon DB field is missing its ledger gate')
+
+    def test_non_persistent_toon_update_preserves_server_ai_signature(self):
+        toon = DistributedToonAI.__new__(DistributedToonAI)
+        args = ['neutral', 1.0, 0]
+        with mock.patch.object(
+                DistributedPlayerAI,
+                'sendUpdate',
+                autospec=True,
+                return_value='sent') as sender:
+            self.assertEqual(
+                DistributedToonAI.sendUpdate(toon, 'setAnimState', args),
+                'sent')
+            sender.assert_called_once_with(toon, 'setAnimState', args)
 
 
 if __name__ == '__main__':

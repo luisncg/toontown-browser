@@ -117,7 +117,7 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
     WantTpTrack = simbase.config.GetBool('want-tptrack', False)
     WantOldGMNameBan = simbase.config.GetBool('want-old-gm-name-ban', 1)
 
-    def sendUpdate(self, fieldName, args=None, sendToId=None):
+    def sendUpdate(self, fieldName, args=None):
         if args is None:
             args = []
         if fieldName in self._LEDGERED_DB_FIELDS:
@@ -139,7 +139,7 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
                 raise RuntimeError(
                     'durable progression approval was unavailable')
         return DistributedPlayerAI.DistributedPlayerAI.sendUpdate(
-            self, fieldName, args, sendToId)
+            self, fieldName, args)
 
     def __init__(self, air):
         DistributedPlayerAI.DistributedPlayerAI.__init__(self, air)
