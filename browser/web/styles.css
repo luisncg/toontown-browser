@@ -267,7 +267,9 @@ html.welcome-required .welcome-overlay {
 .shell {
   position: relative;
   width: min(1800px, calc(100% - 24px));
-  width: min(1800px, calc(100% - 24px), 150svh);
+  /* Reserve enough vertical room above and below the centered 16:9 stage
+     for the masthead, footer, and their gaps on short desktop viewports. */
+  width: min(1800px, calc(100% - 24px), calc(177.7778svh - 264px));
   margin: 0;
   padding: 0;
 }
@@ -506,6 +508,10 @@ footer {
     margin-top: 15px;
     font-size: clamp(15px, 4.5vw, 18px);
   }
+}
+
+@media (max-height: 560px) and (min-width: 701px) {
+  .stage { min-height: 0; }
 }
 
 html.mobile-portrait,
