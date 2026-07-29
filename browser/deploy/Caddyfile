@@ -1,3 +1,7 @@
+{
+	admin 127.0.0.1:2019
+}
+
 toontown.lui.ss {
 	encode zstd gzip
 
