@@ -145,6 +145,7 @@ loadPrcFileData(
     m-binary-alpha true
     browser-fix-dna-sign-order true
     vertex-buffers 1
+    show-total-population true
     required-login auto
     want-gib-loader false
     browser-game-server %s

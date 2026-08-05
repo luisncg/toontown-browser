@@ -62,6 +62,7 @@ if WantNewsPage:
     from toontown.shtiker import NewsPage
 AdjustmentForNewsButton = -0.275
 ClaraBaseXPos = 1.45
+ClaraBaseZPos = 0.37
 if (__debug__):
     import pdb
 
@@ -1055,7 +1056,7 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         if show:
             claraXPos += AdjustmentForNewsButton
             notifyXPos += AdjustmentForNewsButton
-        newPos = (claraXPos - 0.1, 1.0, 0.45)
+        newPos = (claraXPos - 0.1, 1.0, ClaraBaseZPos)
         self.__clarabelleButton.setPos(newPos)
         if self.__catalogNotifyDialog == None or self.__catalogNotifyDialog.frame == None:
             return
@@ -1076,12 +1077,11 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         icon.setColor(white)
         claraXPos = ClaraBaseXPos
         newScale = oldScale = 0.5
-        newPos = (claraXPos, 1.0, 0.37)
+        newPos = (claraXPos, 1.0, ClaraBaseZPos)
         if WantNewsPage:
             claraXPos += AdjustmentForNewsButton
-            oldPos = ((claraXPos, 1.0, 0.37),)
             newScale = oldScale * ToontownGlobals.NewsPageScaleAdjust
-            newPos = (claraXPos - 0.1, 1.0, 0.45)
+            newPos = (claraXPos - 0.1, 1.0, ClaraBaseZPos)
         self.__clarabelleButton = DirectButton(relief=None, image=circle, text='', text_fg=(1, 1, 1, 1), text_shadow=(0, 0, 0, 1), text_scale=0.1, text_pos=(-1.06, 1.06), text_font=ToontownGlobals.getInterfaceFont(), pos=newPos, scale=newScale, command=self.__handleClarabelleButton)
         self.__clarabelleButton.reparentTo(aspect2d, DGG.BACKGROUND_SORT_INDEX - 1)
         button = self.__clarabelleButton.stateNodePath[0]

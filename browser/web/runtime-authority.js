@@ -32,6 +32,7 @@
     gameSessions: 0,
     gameTransitions: 0,
     gameTransitionCommits: 0,
+    transportRetries: 0,
     featureModuleRequests: 0,
     featureModuleHits: 0,
     officialFailures: 0,
@@ -140,6 +141,10 @@
 
   function randomNonce() {
     return base64url(crypto.getRandomValues(new Uint8Array(16)));
+  }
+
+  function wait(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   async function sha256Hex(value) {
@@ -361,7 +366,11 @@
     return authorizationPromise;
   }
 
-  async function signedRequest(pathname, bodyObject, { retry = true } = {}) {
+  async function signedRequest(
+    pathname,
+    bodyObject,
+    { retry = true, transportRetries = 0 } = {},
+  ) {
     if (fatalReason) {
       throw new Error("Official build attestation is required");
     }
@@ -402,28 +411,42 @@
       message,
     );
     diagnostics.signedRequests += 1;
-    const response = await nativeFetch(pathname, {
-      method: "POST",
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Toontown-Authority": current.authorization,
-        "X-Toontown-Authority-Id": current.authorizationId,
-        "X-Toontown-Official-Build":
-          current.officialBuild.attestation,
-        "X-Toontown-Official-Build-Id": officialBuildId,
-        "X-Toontown-Build": current.officialBuild.buildId,
-        "X-Toontown-Proof-Time": timestamp,
-        "X-Toontown-Proof-Nonce": nonce,
-        "X-Toontown-Proof": base64url(signature),
-      },
-      body,
-    });
+    let response;
+    try {
+      response = await nativeFetch(pathname, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Toontown-Authority": current.authorization,
+          "X-Toontown-Authority-Id": current.authorizationId,
+          "X-Toontown-Official-Build":
+            current.officialBuild.attestation,
+          "X-Toontown-Official-Build-Id": officialBuildId,
+          "X-Toontown-Build": current.officialBuild.buildId,
+          "X-Toontown-Proof-Time": timestamp,
+          "X-Toontown-Proof-Nonce": nonce,
+          "X-Toontown-Proof": base64url(signature),
+        },
+        body,
+      });
+    } catch (error) {
+      if (transportRetries < 1) throw error;
+      diagnostics.transportRetries += 1;
+      await wait(150 * (3 - Math.min(transportRetries, 2)));
+      return signedRequest(pathname, bodyObject, {
+        retry,
+        transportRetries: transportRetries - 1,
+      });
+    }
     if (!officialResponse(response, "invalid-attestation")) return response;
     if (retry && [401, 403, 409].includes(response.status)) {
       await prepare({ force: true });
-      return signedRequest(pathname, bodyObject, { retry: false });
+      return signedRequest(pathname, bodyObject, {
+        retry: false,
+        transportRetries,
+      });
     }
     return response;
   }
@@ -639,11 +662,15 @@
     transitionResults.set(id, Object.freeze({ pending: true }));
     (async () => {
       const state = await prepareGameSession();
-      const response = await signedRequest("/api/runtime/game-transitions", {
-        stateToken: state.stateToken,
-        action,
-        target,
-      });
+      const response = await signedRequest(
+        "/api/runtime/game-transitions",
+        {
+          stateToken: state.stateToken,
+          action,
+          target,
+        },
+        { transportRetries: 2 },
+      );
       if (!response.ok) {
         throw new Error(
           `Game transition request failed with ${response.status}`,
