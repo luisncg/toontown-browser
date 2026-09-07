@@ -15,4 +15,4 @@ npm run test:dc-schema-compatibility
 npm run test:estate-transactions
 npm run test:bingo-native
 npm run test:reactive-native
-npm run test:mega-native
+npm run test:classic-buildings

@@ -122,9 +122,12 @@ Production acceptance also checks:
 
 ## Rollback
 
-Each deployment snapshots the previous app tree, environment, private R2
-manifest, and Caddyfile under
-`/srv/toontown-browser/deploy-backups/backend-lease-<timestamp>`.
+Per owner instruction, routine edits and deployments do not create extra
+snapshots or copy the previous app tree, environment, R2 manifest, or Caddyfile.
+Use Git history and retained immutable releases when recovery is needed.
+Existing snapshots, including the protected classic/OG build, remain untouched.
+The scheduled daily player-state backups are independent and remain enabled.
 
-Restore all four pieces together. A client containing the new `lease` query
-must not be paired with the old Python URL validator or old gateway.
+Restore matching client, manifest, and server versions together when needed.
+A client containing the `lease` query must not be paired with an older Python
+URL validator or gateway that cannot accept it.

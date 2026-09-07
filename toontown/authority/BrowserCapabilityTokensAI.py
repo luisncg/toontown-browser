@@ -27,8 +27,6 @@ _ACTIONS = frozenset((
     'fishing.cast',
     'fishing.enter',
     'fish-bingo.claim',
-    'mega.join',
-    'mega.vote',
     'npc.interact',
     'catalog.purchase',
     'boss.reward',
@@ -193,10 +191,7 @@ def normalize_target(action, target):
             'race': _integer(target.get('race'), 1, 0xffffffff),
             'laps': _integer(target.get('laps'), 1, 0x7f),
         }
-    return {
-        'elevator': _integer(target.get('elevator'), 1, 0xffffffff),
-        'accept': _integer(target.get('accept'), 0, 1),
-    }
+    raise ValueError('invalid transition action')
 
 
 def verify_state(token, secret=None, release=None, now=None):

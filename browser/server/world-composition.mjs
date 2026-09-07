@@ -75,10 +75,6 @@ const FEATURE_MODULES = Object.freeze({
         authority: "ai",
         transition: "battle.attack",
       }),
-      megaBuildings: Object.freeze({
-        authority: "ai",
-        transitions: Object.freeze(["building.board", "mega.vote", "mega.join"]),
-      }),
       fishBingo: Object.freeze({
         authority: "ai",
         transition: "fish-bingo.claim",

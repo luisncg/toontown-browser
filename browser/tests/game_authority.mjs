@@ -16,6 +16,12 @@ const thumbprint = "b".repeat(64);
 const officialBuildId = "c".repeat(32);
 const now = 1_800_000_000_000;
 
+for (const action of ["mega.vote", "mega.join"]) {
+  assert.throws(() => normalizeGameTransitionTarget(action, {
+    elevator: 42, accept: 1,
+  }), /action is invalid/);
+}
+
 const initial = createGameSessionState({
   secret,
   release,

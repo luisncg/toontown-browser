@@ -108,10 +108,10 @@ Never put these credentials in the browser bundle, repository, or logs.
 
 ## Rollback
 
-The timestamped deployment backup deliberately retains the previous local
-`.wasm` and `.data` files. To roll back, restore that application backup and
-origin environment, restore the previous Worker version if its route changed,
-and restart only `toontown-browser.service`.
+Routine deployments do not create per-change backup copies. Recover through
+Git history and retained immutable R2 releases, deploying a matching runtime,
+manifest, and server version. Restore the previous Worker version if its route
+changed, and restart only `toontown-browser.service`.
 
 Do not delete an R2 release as part of rollback. R2 cleanup requires a separate
 inventory and explicit destructive approval.

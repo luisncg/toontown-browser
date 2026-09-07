@@ -77,7 +77,7 @@
     "test:reactive-movie-native": "PYTHONPATH=.toolchain/build/panda3d-native-server:. python3.12 browser/tests/test_reactive_movie_native.py",
     "test:reactive-movie-browser": ".build-wasm/playwright-venv/bin/python browser/tests/smoke_reactive_gag_movies.py",
     "test:reactive-ui-browser": ".build-wasm/playwright-venv/bin/python browser/tests/smoke_reactive_gag_ui.py",
-    "test:mega-native": "python3 -m unittest browser.tests.test_mega_building_rules && PYTHONPATH=.toolchain/build/panda3d-native-server:. python3.12 -m unittest browser.tests.test_mega_building_native",
+    "test:classic-buildings": "PYTHONPATH=.toolchain/build/panda3d-native-server:. python3.12 -m unittest browser.tests.test_classic_buildings",
     "test:login-disconnect": "python3 browser/tests/smoke_login_disconnect.py",
     "test:login-idle": "python3 browser/tests/smoke_login_idle.py",
     "test:gateway-runtime-handoff": ".build-wasm/playwright-venv/bin/python browser/tests/smoke_gateway_runtime_handoff.py",

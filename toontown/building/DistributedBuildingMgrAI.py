@@ -5,7 +5,6 @@ from otp.ai.AIBaseGlobal import *
 from . import DistributedBuildingAI, HQBuildingAI, GagshopBuildingAI, PetshopBuildingAI
 from toontown.building.KartShopBuildingAI import KartShopBuildingAI
 from toontown.building import DistributedAnimBuildingAI
-from toontown.building import MegaBuildingGlobals
 from direct.directnotify import DirectNotifyGlobal
 from toontown.hood import ZoneUtil
 import time, random
@@ -155,13 +154,6 @@ class DistributedBuildingMgrAI:
             building.difficulty = int(blockData.get('difficulty', 1))
             building.numFloors = int(blockData.get('numFloors', 1))
             building.numFloors = max(1, min(5, building.numFloors))
-            storedMegaFloors = blockData.get('megaFloors')
-            if storedMegaFloors is None:
-                storedMegaFloors = MegaBuildingGlobals.chooseMegaFloors(
-                    building.numFloors,
-                    random.Random((self.branchID << 16) + blockNumber))
-            building.megaFloors = MegaBuildingGlobals.clampMegaFloors(
-                building.numFloors, storedMegaFloors)
             if not ZoneUtil.isWelcomeValley(building.zoneId):
                 building.updateSavedBy(blockData.get('savedBy'))
             else:
@@ -188,13 +180,6 @@ class DistributedBuildingMgrAI:
             building.difficulty = int(blockData.get('difficulty', 1))
             building.numFloors = int(blockData.get('numFloors', 1))
             building.numFloors = max(1, min(5, building.numFloors))
-            storedMegaFloors = blockData.get('megaFloors')
-            if storedMegaFloors is None:
-                storedMegaFloors = MegaBuildingGlobals.chooseMegaFloors(
-                    building.numFloors,
-                    random.Random((self.branchID << 16) + blockNumber))
-            building.megaFloors = MegaBuildingGlobals.clampMegaFloors(
-                building.numFloors, storedMegaFloors)
             if not ZoneUtil.isWelcomeValley(building.zoneId):
                 building.updateSavedBy(blockData.get('savedBy'))
             else:

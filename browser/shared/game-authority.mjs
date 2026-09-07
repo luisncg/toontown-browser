@@ -26,8 +26,6 @@ const ACTIONS = new Set([
   "fishing.cast",
   "fishing.enter",
   "fish-bingo.claim",
-  "mega.join",
-  "mega.vote",
   "npc.interact",
   "catalog.purchase",
   "boss.reward",
@@ -219,10 +217,7 @@ export function normalizeGameTransitionTarget(action, target) {
       laps: integer(value.laps, 1, 0x7f, "Race lap count"),
     });
   }
-  return Object.freeze({
-    elevator: integer(value.elevator, 1, 0xffff_ffff, "Elevator id"),
-    accept: integer(value.accept, 0, 1, "Mega-Building choice"),
-  });
+  throw new Error("Game transition action is invalid");
 }
 
 function validStatePayload(payload, {

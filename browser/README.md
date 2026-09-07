@@ -128,14 +128,10 @@ During ordinary walk gameplay, click the canvas to capture the pointer and move
 the mouse horizontally to turn the Toon; Esc, menus, and non-walk control modes
 release it. Keyboard turning remains active as a fallback.
 
-Street Cog Buildings advertise an optional Cog Mega-Building run with a second
-row of yellow floor dots and a temporary explainer sign. When the first four
-Toons board, all four must vote yes for Mega mode; a no vote or timeout keeps
-the regular building and gives the group ten seconds to leave. An approved vote
-opens four more confirmed seats for up to eight Toons. Mega runs use the full
-regular-plus-yellow floor total (six to ten all-Mega floors), extra Cogs on each
-floor, up to two independent four-Toon battle fronts, and floor-scaled rewards.
-The original one-to-four-Toon Cog Building path remains available unchanged.
+Street Cog Buildings use the classic one-to-five floors and one-to-four Toons.
+Mega voting, recruitment, yellow dots, signs, and Mega encounters are retired.
+Their old distributed-schema fields remain reserved and inert to preserve
+protocol compatibility; they do not enable any gameplay feature.
 
 For camera authoring, press Shift+F8 during normal walk gameplay to enter the POV Free
 Camera Lab. WASD flies, Q/E moves vertically, Shift boosts speed, the mouse or

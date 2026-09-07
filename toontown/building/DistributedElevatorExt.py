@@ -12,10 +12,6 @@ from direct.fsm import State
 from toontown.hood import ZoneUtil
 from toontown.toonbase import TTLocalizer
 from toontown.toontowngui import TeaserPanel
-from toontown.toontowngui import TTDialog
-from direct.gui import DirectGuiGlobals as DGG
-from direct.task import Task
-from . import MegaBuildingGlobals
 
 class DistributedElevatorExt(DistributedElevator.DistributedElevator):
 
@@ -23,14 +19,6 @@ class DistributedElevatorExt(DistributedElevator.DistributedElevator):
         DistributedElevator.DistributedElevator.__init__(self, cr)
         self.nametag = None
         self.currentFloor = -1
-        self.megaState = MegaBuildingGlobals.MEGA_STATE_CLASSIC
-        self.megaStateDuration = 0
-        self.megaStateTimestamp = 0
-        self.megaVoteDialog = None
-        self.megaJoinDialog = None
-        self.megaNoticeDialog = None
-        self.megaVoteSubmitted = False
-        self.megaNoticeState = None
         return
 
     def setupElevator(self):
@@ -42,127 +30,15 @@ class DistributedElevatorExt(DistributedElevator.DistributedElevator):
         self.setupNametag()
 
     def disable(self):
-        taskMgr.remove(self.uniqueName('show-mega-vote'))
-        self._cleanupMegaDialogs()
         self.clearNametag()
         DistributedElevator.DistributedElevator.disable(self)
 
-    def _cleanupDialog(self, attribute):
-        dialog = getattr(self, attribute, None)
-        if dialog is not None:
-            dialog.destroy()
-            setattr(self, attribute, None)
+    def setMegaState(self, *unused):
+        """Ignore retired Mega state without showing any UI."""
+        pass
 
-    def _cleanupMegaDialogs(self):
-        self._cleanupDialog('megaVoteDialog')
-        self._cleanupDialog('megaJoinDialog')
-        self._cleanupDialog('megaNoticeDialog')
-
-    def _localIsBoarded(self):
-        return bool(self.localToonOnBoard or
-                    base.localAvatar.doId in self.boardedAvIds)
-
-    def setMegaState(self, state, yesVotes, voterCount, duration, timestamp):
-        previousState = self.megaState
-        self.megaState = state
-        self.megaStateDuration = duration
-        self.megaStateTimestamp = timestamp
-        if state != MegaBuildingGlobals.MEGA_STATE_VOTING:
-            self._cleanupDialog('megaVoteDialog')
-            self.megaVoteSubmitted = False
-        if hasattr(self, 'bldg') and self.bldg:
-            self.bldg.setMegaDisplayActive(
-                state in (MegaBuildingGlobals.MEGA_STATE_RECRUITING,
-                          MegaBuildingGlobals.MEGA_STATE_DEPARTING))
-        if state == MegaBuildingGlobals.MEGA_STATE_VOTING:
-            taskMgr.remove(self.uniqueName('show-mega-vote'))
-            taskMgr.doMethodLater(0.15, self._showMegaVoteTask,
-                                  self.uniqueName('show-mega-vote'),
-                                  extraArgs=[yesVotes, voterCount], appendTask=True)
-        elif state == MegaBuildingGlobals.MEGA_STATE_RECRUITING:
-            if previousState != state and self._localIsBoarded():
-                self._showMegaNotice(
-                    'Cog Mega-Building approved!\n\n'
-                    'Four extra spots are open. This run will use %s Mega floors.' %
-                    getattr(self.bldg, 'megaFloors', '?'), state)
-        elif state == MegaBuildingGlobals.MEGA_STATE_REGULAR_FALLBACK:
-            if previousState != state and self._localIsBoarded():
-                self._showMegaNotice(
-                    'The group chose a Regular Cog Building.\n\n'
-                    'The elevator leaves in 10 seconds. You may hop off now.', state)
-        elif state == MegaBuildingGlobals.MEGA_STATE_DEPARTING:
-            # Never carry a notice or join prompt into the elevator ride.
-            self._cleanupMegaDialogs()
-        elif state == MegaBuildingGlobals.MEGA_STATE_CLASSIC:
-            self._cleanupMegaDialogs()
-            self.megaNoticeState = None
-
-    def _showMegaVoteTask(self, yesVotes, voterCount, task):
-        if (self.megaState == MegaBuildingGlobals.MEGA_STATE_VOTING and
-                self._localIsBoarded() and not self.megaVoteSubmitted and
-                self.megaVoteDialog is None):
-            megaFloors = getattr(self.bldg, 'megaFloors', '?')
-            self.megaVoteDialog = TTDialog.TTDialog(
-                text=('Choose this building run:\n\n'
-                      'Cog Mega-Building: %s all-Mega floors and up to 8 Toons.\n'
-                      'Mega requires all 4 votes. (%s/%s yes)') %
-                     (megaFloors, yesVotes, voterCount),
-                style=TTDialog.TwoChoice,
-                buttonTextList=['Mega Building', 'Regular Building'],
-                command=self._handleMegaVote,
-                fadeScreen=0.45,
-                text_wordwrap=18,
-                text_scale=0.065)
-        return Task.done
-
-    def _handleMegaVote(self, value):
-        acceptMega = value == DGG.DIALOG_OK
-        self.megaVoteSubmitted = True
-        self._cleanupDialog('megaVoteDialog')
-        from toontown.authority.BrowserAuthorityManager import requestTransition
-        choice = int(acceptMega)
-        requestTransition(
-            'mega.vote',
-            {'elevator': self.doId, 'accept': choice},
-            lambda: self.sendUpdate('requestMegaVote', [choice]))
-
-    def showMegaJoinPrompt(self, megaFloors):
-        self._cleanupDialog('megaJoinDialog')
-        self.megaJoinDialog = TTDialog.TTDialog(
-            text=('Join this %s-floor Cog Mega-Building?\n\n'
-                  'Up to 8 Toons can enter, and every floor uses Mega rules.') %
-                 megaFloors,
-            style=TTDialog.YesNo,
-            command=self._handleMegaJoin,
-            fadeScreen=0.4,
-            text_wordwrap=18,
-            text_scale=0.065)
-
-    def _handleMegaJoin(self, value):
-        acceptMega = value == DGG.DIALOG_OK
-        self._cleanupDialog('megaJoinDialog')
-        from toontown.authority.BrowserAuthorityManager import requestTransition
-        choice = int(acceptMega)
-        requestTransition(
-            'mega.join',
-            {'elevator': self.doId, 'accept': choice},
-            lambda: self.sendUpdate('requestMegaJoin', [choice]))
-
-    def _showMegaNotice(self, message, state):
-        if self.megaNoticeState == state:
-            return
-        self.megaNoticeState = state
-        self._cleanupDialog('megaNoticeDialog')
-        self.megaNoticeDialog = TTDialog.TTDialog(
-            text=message,
-            style=TTDialog.Acknowledge,
-            command=self._handleMegaNotice,
-            fadeScreen=0.15,
-            text_wordwrap=18,
-            text_scale=0.065)
-
-    def _handleMegaNotice(self, value):
-        self._cleanupDialog('megaNoticeDialog')
+    def showMegaJoinPrompt(self, *unused):
+        pass
 
     def setupNametag(self):
         if self.nametag == None:
@@ -202,28 +78,17 @@ class DistributedElevatorExt(DistributedElevator.DistributedElevator):
         if self.getBldgDoorOrigin():
             self.bossLevel = self.bldg.getBossLevel()
             self.setupElevator()
-            self.bldg.setMegaDisplayActive(
-                self.megaState in (MegaBuildingGlobals.MEGA_STATE_RECRUITING,
-                                   MegaBuildingGlobals.MEGA_STATE_DEPARTING))
         else:
             self.notify.warning('setBldgDoId: elevator %d cannot find suitDoorOrigin for bldg %d!' % (self.doId, bldgDoId))
         return
 
     def setFloor(self, floorNumber):
         if self.currentFloor >= 0:
-            indicator = self.bldg.getFloorIndicatorNode(self.currentFloor)
-            if indicator:
-                if self.bldg.megaDisplayActive:
-                    indicator.setColor(1.0, 0.67, 0.02, 1.0)
-                else:
-                    indicator.setColor(LIGHT_OFF_COLOR)
+            if self.bldg.floorIndicator[self.currentFloor]:
+                self.bldg.floorIndicator[self.currentFloor].setColor(LIGHT_OFF_COLOR)
         if floorNumber >= 0:
-            indicator = self.bldg.getFloorIndicatorNode(floorNumber)
-            if indicator:
-                if self.bldg.megaDisplayActive:
-                    indicator.setColor(1.0, 1.0, 0.25, 1.0)
-                else:
-                    indicator.setColor(LIGHT_ON_COLOR)
+            if self.bldg.floorIndicator[floorNumber]:
+                self.bldg.floorIndicator[floorNumber].setColor(LIGHT_ON_COLOR)
         self.currentFloor = floorNumber
 
     def handleEnterSphere(self, collEntry):
